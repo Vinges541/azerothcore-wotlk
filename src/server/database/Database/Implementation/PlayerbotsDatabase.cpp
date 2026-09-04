@@ -112,6 +112,36 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
             "scale_16, scale_17, scale_18, scale_19, scale_20, scale_21, scale_22, scale_23, scale_24, scale_25, scale_26, scale_27, scale_28, scale_29, scale_30, scale_31, scale_32) "
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_DEL_EQUIP_CACHE_NEW, "DELETE FROM playerbots_item_info_cache WHERE id = ?", CONNECTION_ASYNC);
+
+    // Always returns 32 rows, including missing profiles: an empty result is a failed read, not new identities.
+    PrepareStatement(PLAYERBOTS_SEL_AUTONOMOUS_PROFILES,
+        "SELECT ids.guid, p.version, p.revision, p.payload FROM ("
+        "SELECT CAST(? AS UNSIGNED) AS guid UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
+        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED)"
+        ") ids LEFT JOIN playerbots_autonomous_profile p ON p.guid = ids.guid", CONNECTION_SYNCH);
+    // Upgrade codec only with a current revision; delayed old-codec writes must never downgrade a biography.
+    // Payload/time precede version and revision assignments, so their guards see the original row.
+    PrepareStatement(PLAYERBOTS_INS_AUTONOMOUS_PROFILE,
+        "INSERT INTO playerbots_autonomous_profile (guid, version, revision, updated_at, payload) "
+        "VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE "
+        "payload = IF(version <= VALUES(version) AND revision <= VALUES(revision), VALUES(payload), payload), "
+        "updated_at = IF(version <= VALUES(version) AND revision <= VALUES(revision), VALUES(updated_at), updated_at), "
+        "version = IF(version <= VALUES(version) AND revision <= VALUES(revision), VALUES(version), version), "
+        "revision = IF(version = VALUES(version), GREATEST(revision, VALUES(revision)), revision)", CONNECTION_ASYNC);
 }
 
 PlayerbotsDatabaseConnection::PlayerbotsDatabaseConnection(MySQLConnectionInfo& connInfo) : MySQLConnection(connInfo)
