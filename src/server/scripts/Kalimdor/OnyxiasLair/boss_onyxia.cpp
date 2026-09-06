@@ -16,7 +16,9 @@
  */
 
 #include "CreatureScript.h"
+#include "GameTime.h"
 #include "Map.h"
+#include "ObjectMgr.h"
 #include "Player.h"
 #include "ScriptedCreature.h"
 #include "SpellInfo.h"
@@ -201,22 +203,28 @@ public:
         Talk(SAY_AGGRO);
         SetPhase(PHASE_GROUNDED);
 
+        Map* map = me->GetMap();
         for (ObjectGuid::LowType spawnId : OnyxianWarderSpawnIds)
         {
-            bool hasAliveSpawn = false;
-            auto bounds = me->GetMap()->GetCreatureBySpawnIdStore().equal_range(spawnId);
-            for (auto itr = bounds.first; itr != bounds.second; ++itr)
-            {
-                if (!itr->second->IsAlive())
-                    itr->second->Respawn();
-                hasAliveSpawn |= itr->second->IsAlive();
-            }
+            CreatureData const* data = sObjectMgr->GetCreatureData(spawnId);
+            if (!data || data->id != NPC_ONYXIAN_WARDER || data->mapid != map->GetId())
+                continue;
 
-            // Dynamic respawns remove the dead object from the map, so force its database spawn as well.
-            if (!hasAliveSpawn)
+            auto bounds = map->GetCreatureBySpawnIdStore().equal_range(spawnId);
+            if (bounds.first != bounds.second)
             {
-                me->GetMap()->RemoveCreatureRespawnTime(spawnId);
-                me->GetMap()->ProcessCreatureRespawn(spawnId);
+                for (auto itr = bounds.first; itr != bounds.second; ++itr)
+                {
+                    // Preserve fresh corpses for looting and skinning.
+                    if (itr->second->getDeathState() == DeathState::Dead)
+                        itr->second->Respawn();
+                }
+            }
+            else
+            {
+                // Despawned dynamic spawns must return through the normal respawn queue.
+                time_t respawnTime = GameTime::GetGameTime().count();
+                map->SaveCreatureRespawnTime(spawnId, respawnTime);
             }
         }
 
