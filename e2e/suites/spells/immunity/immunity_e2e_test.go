@@ -3,6 +3,7 @@
 package immunity_test
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -130,6 +131,23 @@ func TestAC_25481_LadyVashjFourMagicBarriers(t *testing.T) {
 	if vashj == 0 {
 		e2eharness.Preconditionf(t, "Lady Vashj (21212) not found after .go creature id 21212")
 	}
+	// Observe slots before phase 2. GetActiveAuras deduplicates spell IDs, and
+	// AuraStacks returns the maximum stack count, not the number of applications.
+	var auraMu sync.Mutex
+	auraSlots := make(map[uint8]uint32)
+	cancel := bot.World.AddPacketHook(func(opcode uint16, data []byte) {
+		if opcode != auraUpdate && opcode != auraUpdateAll {
+			return
+		}
+		target, slots, ok := decodeAuraSlots(data)
+		if !ok || target != vashj {
+			return
+		}
+		auraMu.Lock()
+		defer auraMu.Unlock()
+		applyAuraSlots(auraSlots, slots, opcode == auraUpdateAll)
+	})
+	defer cancel()
 	bot.CombatReadyFull(t)
 	bot.Engage(t, vashj, 20*time.Second)
 	// Phase 2 starts at 70% HP; drop her below that without killing her.
@@ -138,12 +156,10 @@ func TestAC_25481_LadyVashjFourMagicBarriers(t *testing.T) {
 	// The four phase-2 beams each apply their own Magic Barrier (one aura slot per
 	// generator/caster), so count aura applications rather than stack count.
 	barriers := func() int {
-		obj := bot.World.GetObject(vashj)
-		if obj == nil {
-			return 0
-		}
+		auraMu.Lock()
+		defer auraMu.Unlock()
 		n := 0
-		for _, id := range obj.GetActiveAuras() {
+		for _, id := range auraSlots {
 			if id == spellMagicBarrier {
 				n++
 			}
