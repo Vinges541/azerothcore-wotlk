@@ -21,7 +21,11 @@
 #include "AreaDefines.h"
 #include "Player.h"
 #include "WorldStateDefines.h"
+#include "WorldStateSaveQueue.h"
+#include "Transaction.h"
 #include <atomic>
+#include <map>
+#include <optional>
 
 enum WorldStateCondition
 {
@@ -289,6 +293,10 @@ class WorldState
         void Load();
         void LoadWorldStates();
         void setWorldState(uint32 index, uint64 value);
+        // Queues one atomic snapshot. Call on the world thread; DB completion is asynchronous.
+        void setWorldStates(std::map<uint32, uint32> const& values);
+        // Shutdown only: drain the serialized batch queue while DB workers are still running.
+        bool FlushWorldStateSaves();
         [[nodiscard]] uint64 getWorldState(uint32 index) const;
         void Save(WorldStateSaveIds saveId);
         void SaveHelper(std::string& stringToSave, WorldStateSaveIds saveId);
@@ -310,6 +318,9 @@ class WorldState
     private:
         typedef std::map<uint32, uint64> WorldStatesMap;
         WorldStatesMap _worldstates;
+        void ProcessWorldStateSaves(bool wait = false);
+        WorldStateSaveQueue _worldStateSaveQueue;
+        std::optional<TransactionCallback> _worldStateWrite;
         void SendWorldstateUpdate(std::mutex& mutex, GuidVector const& guids, uint32 value, uint32 worldStateId);
         void StopSunsReachPhase(bool forward);
         void StartSunsReachPhase(bool initial = false);

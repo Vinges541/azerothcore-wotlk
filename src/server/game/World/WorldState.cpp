@@ -17,6 +17,7 @@
 
 #include "AreaDefines.h"
 #include "CreatureAIImpl.h"
+#include "DatabaseEnv.h"
 #include "GameEventMgr.h"
 #include "Log.h"
 #include "MapMgr.h"
@@ -28,6 +29,7 @@
 #include "WorldState.h"
 #include "WorldConfig.h"
 #include "WorldStateDefines.h"
+#include <algorithm>
 #include <chrono>
 
 WorldState* WorldState::instance()
@@ -187,6 +189,70 @@ void WorldState::setWorldState(uint32 index, uint64 timeValue)
     _worldstates[index] = timeValue;
 }
 
+void WorldState::setWorldStates(std::map<uint32, uint32> const& values)
+{
+    if (values.empty())
+        return;
+
+    if (!sToCloud9Sidecar->IsCrossrealm())
+    {
+        _worldStateSaveQueue.Enqueue(values);
+        ProcessWorldStateSaves();
+    }
+
+    for (auto const& [index, value] : values)
+        _worldstates[index] = value;
+}
+
+void WorldState::ProcessWorldStateSaves(bool wait)
+{
+    if (_worldStateWrite)
+    {
+        if (wait)
+            _worldStateWrite->m_future.wait();
+        if (!_worldStateWrite->InvokeIfReady())
+            return;
+        _worldStateWrite.reset();
+    }
+
+    WorldStateSaveQueue::Values const* values = _worldStateSaveQueue.Begin(wait);
+    if (!values)
+        return;
+
+    CharacterDatabaseTransaction transaction = CharacterDatabase.BeginTransaction();
+    for (auto const& [index, value] : *values)
+    {
+        CharacterDatabasePreparedStatement* stmt =
+            CharacterDatabase.GetPreparedStatement(CHAR_REP_WORLDSTATE_BATCH);
+        stmt->SetData(0, index);
+        stmt->SetData(1, value);
+        transaction->Append(stmt);
+    }
+    _worldStateWrite.emplace(CharacterDatabase.AsyncCommitTransaction(transaction));
+    _worldStateWrite->AfterComplete([this](bool success)
+    {
+        _worldStateSaveQueue.Complete(success);
+        if (!success)
+            LOG_ERROR("sql.sql", "World-state batch failed; retained for retry");
+    });
+}
+
+bool WorldState::FlushWorldStateSaves()
+{
+    // One in-flight snapshot plus one coalesced snapshot; a failed DB must not cause an endless retry.
+    for (uint32 attempt = 0; attempt < 3 && !_worldStateSaveQueue.IsDrained(); ++attempt)
+        ProcessWorldStateSaves(true);
+    // The last iteration can submit a retry. Always observe it before DB workers are stopped,
+    // without submitting another retry on failure.
+    if (_worldStateWrite)
+    {
+        _worldStateWrite->m_future.wait();
+        _worldStateWrite->InvokeIfReady();
+        _worldStateWrite.reset();
+    }
+    return _worldStateSaveQueue.IsDrained();
+}
+
 uint64 WorldState::getWorldState(uint32 index) const
 {
     auto const& itr = _worldstates.find(index);
@@ -312,6 +378,8 @@ void WorldState::HandleExternalEvent(WorldStateEvent eventId, uint32 param)
 
 void WorldState::Update(uint32 diff)
 {
+    _worldStateSaveQueue.Update(diff);
+    ProcessWorldStateSaves();
     if (_adalSongOfBattleTimer)
     {
         if (_adalSongOfBattleTimer <= diff)
