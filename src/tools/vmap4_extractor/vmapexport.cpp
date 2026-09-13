@@ -18,6 +18,7 @@
 #define _CRT_SECURE_NO_DEPRECATE
 #include <cerrno>
 #include <cstdio>
+#include <filesystem>
 #include <list>
 #include <map>
 #include <sys/stat.h>
@@ -256,16 +257,9 @@ bool scan_patches(char* scanmatch, std::vector<std::string>& pArchiveNames)
         {
             sprintf(path, "%s.MPQ", scanmatch);
         }
-#ifdef __linux__
-        if (FILE* h = fopen64(path, "rb"))
-#else
-        if (FILE* h = fopen(path, "rb"))
-#endif
-        {
-            fclose(h);
-            //matches.push_back(path);
+        std::error_code error;
+        if (std::filesystem::exists(path, error))
             pArchiveNames.emplace_back(path);
-        }
     }
 
     return (true);

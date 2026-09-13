@@ -17,15 +17,115 @@
 
 #include "mpq_libmpq04.h"
 #include <algorithm>
+#include <cctype>
 #include <cstdio>
 #include <deque>
+#include <filesystem>
+#include <fstream>
+#include <system_error>
 
 ArchiveSet gOpenArchives;
 
+namespace
+{
+std::string Lowercase(std::string value)
+{
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char character)
+    {
+        return static_cast<char>(std::tolower(character));
+    });
+    return value;
+}
+
+std::filesystem::path ResolveLooseFile(std::filesystem::path const& root, char const* filename)
+{
+    std::string normalized(filename);
+    std::replace(normalized.begin(), normalized.end(), '\\', '/');
+    std::filesystem::path relative = std::filesystem::path(normalized).lexically_normal();
+    if (relative.is_absolute())
+        return {};
+
+    for (std::filesystem::path const& part : relative)
+        if (part == "..")
+            return {};
+
+    std::error_code error;
+    std::filesystem::path direct = root / relative;
+    if (std::filesystem::is_regular_file(direct, error))
+        return direct;
+
+    std::filesystem::path current = root;
+    for (std::filesystem::path const& part : relative)
+    {
+        if (part == ".")
+            continue;
+
+        std::filesystem::path match;
+        std::string wanted = Lowercase(part.string());
+        for (std::filesystem::directory_iterator iterator(current, error), end; !error && iterator != end; ++iterator)
+        {
+            if (Lowercase(iterator->path().filename().string()) == wanted)
+            {
+                match = iterator->path();
+                break;
+            }
+        }
+        if (match.empty())
+            return {};
+        current = match;
+    }
+
+    return std::filesystem::is_regular_file(current, error) ? current : std::filesystem::path{};
+}
+
+bool ReadLooseFile(std::filesystem::path const& root, char const* filename, char*& buffer, libmpq__off_t& size)
+{
+    std::filesystem::path path = ResolveLooseFile(root, filename);
+    if (path.empty())
+        return false;
+
+    std::ifstream input(path, std::ios::binary | std::ios::ate);
+    if (!input)
+        return false;
+
+    std::streampos endPosition = input.tellg();
+    if (endPosition < 0)
+        return false;
+    std::streamsize fileSize = static_cast<std::streamsize>(endPosition);
+    if (fileSize <= 1)
+    {
+        size = static_cast<libmpq__off_t>(fileSize);
+        return true;
+    }
+
+    input.seekg(0);
+    buffer = new char[static_cast<std::size_t>(fileSize)];
+    if (!input.read(buffer, fileSize))
+    {
+        delete[] buffer;
+        buffer = nullptr;
+        return false;
+    }
+
+    size = static_cast<libmpq__off_t>(fileSize);
+    return true;
+}
+}
+
 MPQArchive::MPQArchive(char const* filename)
 {
-    int result = libmpq__archive_open(&mpq_a, filename, -1);
     printf("Opening %s\n", filename);
+    std::error_code error;
+    if (std::filesystem::is_directory(filename, error))
+    {
+        _looseRoot = std::filesystem::absolute(filename, error).string();
+        _closed = false;
+        gOpenArchives.push_front(this);
+        printf("Mounted loose patch directory %s\n", filename);
+        return;
+    }
+
+    int result = libmpq__archive_open(&mpq_a, filename, -1);
     if (result)
     {
         switch (result)
@@ -51,18 +151,65 @@ MPQArchive::MPQArchive(char const* filename)
         }
         return;
     }
+    _closed = false;
     gOpenArchives.push_front(this);
 }
 
 bool MPQArchive::isOpened() const
 {
-    return std::find(gOpenArchives.begin(), gOpenArchives.end(), this) != gOpenArchives.end();
+    return !_closed && std::find(gOpenArchives.begin(), gOpenArchives.end(), this) != gOpenArchives.end();
 }
 
 void MPQArchive::close()
 {
-    //gOpenArchives.erase(erase(&mpq_a);
-    libmpq__archive_close(mpq_a);
+    if (_closed)
+        return;
+    if (mpq_a)
+        libmpq__archive_close(mpq_a);
+    mpq_a = nullptr;
+    _closed = true;
+}
+
+void MPQArchive::GetFileListTo(vector<string>& filelist)
+{
+    if (isLoose())
+    {
+        std::error_code error;
+        std::filesystem::path root(_looseRoot);
+        for (std::filesystem::recursive_directory_iterator iterator(root, error), end;
+            !error && iterator != end; ++iterator)
+        {
+            if (!iterator->is_regular_file(error))
+                continue;
+            std::string relative = std::filesystem::relative(iterator->path(), root, error).generic_string();
+            std::replace(relative.begin(), relative.end(), '/', '\\');
+            filelist.push_back(relative);
+        }
+        return;
+    }
+
+    uint32_t filenum;
+    if (libmpq__file_number(mpq_a, "(listfile)", &filenum))
+        return;
+    libmpq__off_t size, transferred;
+    libmpq__file_unpacked_size(mpq_a, filenum, &size);
+
+    char* buffer = new char[size + 1];
+    buffer[size] = '\0';
+    libmpq__file_read(mpq_a, filenum, reinterpret_cast<unsigned char*>(buffer), size, &transferred);
+
+    char seps[] = "\n";
+    char* token = strtok(buffer, seps);
+    uint32 counter = 0;
+    while (token != nullptr && counter < size)
+    {
+        token[strlen(token) - 1] = 0;
+        filelist.emplace_back(token);
+        counter += strlen(token) + 2;
+        token = strtok(nullptr, seps);
+    }
+
+    delete[] buffer;
 }
 
 MPQFile::MPQFile(char const* filename):
@@ -71,12 +218,26 @@ MPQFile::MPQFile(char const* filename):
     pointer(0),
     size(0)
 {
+    std::string archiveFilename(filename);
+    std::replace(archiveFilename.begin(), archiveFilename.end(), '/', '\\');
     for (auto & gOpenArchive : gOpenArchives)
     {
+        if (gOpenArchive->isLoose())
+        {
+            if (!ReadLooseFile(gOpenArchive->getLooseRoot(), filename, buffer, size))
+                continue;
+            if (size <= 1)
+            {
+                eof = true;
+                return;
+            }
+            return;
+        }
+
         mpq_archive* mpq_a = gOpenArchive->mpq_a;
 
         uint32 filenum;
-        if (libmpq__file_number(mpq_a, filename, &filenum)) continue;
+        if (libmpq__file_number(mpq_a, archiveFilename.c_str(), &filenum)) continue;
         libmpq__off_t transferred;
         libmpq__file_unpacked_size(mpq_a, filenum, &size);
 
@@ -91,7 +252,7 @@ MPQFile::MPQFile(char const* filename):
         buffer = new char[size];
 
         //libmpq_file_getdata
-        libmpq__file_read(mpq_a, filenum, (unsigned char*)buffer, size, &transferred);
+        libmpq__file_read(mpq_a, filenum, reinterpret_cast<unsigned char*>(buffer), size, &transferred);
         /*libmpq_file_getdata(&mpq_a, hash, fileno, (unsigned char*)buffer);*/
         return;
     }

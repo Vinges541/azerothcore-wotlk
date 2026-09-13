@@ -23,6 +23,7 @@
 #include <cstring>
 #include <deque>
 #include <iostream>
+#include <string>
 #include <vector>
 
 using namespace std;
@@ -31,41 +32,20 @@ using namespace std;
 class MPQArchive
 {
 public:
-    mpq_archive_s* mpq_a;
+    mpq_archive_s* mpq_a = nullptr;
 
     MPQArchive(char const* filename);
-    ~MPQArchive() { close(); }
+    ~MPQArchive() { if (isOpened()) close(); }
     void close();
+    bool isLoose() const { return !_looseRoot.empty(); }
+    bool isOpened() const;
+    std::string const& getLooseRoot() const { return _looseRoot; }
 
-    void GetFileListTo(vector<string>& filelist)
-    {
-        uint32_t filenum;
-        if (libmpq__file_number(mpq_a, "(listfile)", &filenum)) return;
-        libmpq__off_t size, transferred;
-        libmpq__file_unpacked_size(mpq_a, filenum, &size);
+    void GetFileListTo(vector<string>& filelist);
 
-        char* buffer = new char[size + 1];
-        buffer[size] = '\0';
-
-        libmpq__file_read(mpq_a, filenum, (unsigned char*)buffer, size, &transferred);
-
-        char seps[] = "\n";
-        char* token;
-
-        token = strtok( buffer, seps );
-        uint32 counter = 0;
-        while ((token != nullptr) && (counter < size))
-        {
-            //cout << token << endl;
-            token[strlen(token) - 1] = 0;
-            string s = token;
-            filelist.push_back(s);
-            counter += strlen(token) + 2;
-            token = strtok(nullptr, seps);
-        }
-
-        delete[] buffer;
-    }
+private:
+    bool _closed = true;
+    std::string _looseRoot;
 };
 typedef std::deque<MPQArchive*> ArchiveSet;
 

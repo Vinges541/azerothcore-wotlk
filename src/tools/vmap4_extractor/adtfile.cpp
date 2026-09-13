@@ -29,6 +29,8 @@ char const* GetPlainName(char const* FileName)
 
     if ((szTemp = strrchr(FileName, '\\')) != nullptr)
         FileName = szTemp + 1;
+    if ((szTemp = strrchr(FileName, '/')) != nullptr)
+        FileName = szTemp + 1;
     return FileName;
 }
 
@@ -37,6 +39,8 @@ char* GetPlainName(char* FileName)
     char* szTemp;
 
     if ((szTemp = strrchr(FileName, '\\')) != nullptr)
+        FileName = szTemp + 1;
+    if ((szTemp = strrchr(FileName, '/')) != nullptr)
         FileName = szTemp + 1;
     return FileName;
 }
