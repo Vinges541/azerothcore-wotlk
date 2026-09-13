@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "product": "wow",
+    "expansion": "Cataclysm",
+    "version": "4.3.4",
+    "build": 15595
+  },
+  "maps": [
+    {
+      "sourceMapId": 0,
+      "sourceInternalName": "Azeroth",
+      "targetMapId": 900,
+      "targetInternalName": "AzerothCata",
+      "displayName": "Eastern Kingdoms (Cataclysm)"
+    },
+    {
+      "sourceMapId": 1,
+      "sourceInternalName": "Kalimdor",
+      "targetMapId": 901,
+      "targetInternalName": "KalimdorCata",
+      "displayName": "Kalimdor (Cataclysm)"
+    }
+  ]
+}
