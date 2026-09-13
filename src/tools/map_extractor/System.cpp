@@ -39,23 +39,6 @@
 #include "adt.h"
 #include "wdt.h"
 
-#include <fcntl.h>
-
-#if defined( __GNUC__ )
-#define _open   open
-#define _close close
-#ifndef O_BINARY
-#define O_BINARY 0
-#endif
-#else
-#include <io.h>
-#endif
-
-#ifdef O_LARGEFILE
-#define OPEN_FLAGS  (O_RDONLY | O_BINARY | O_LARGEFILE)
-#else
-#define OPEN_FLAGS (O_RDONLY | O_BINARY)
-#endif
 extern ArchiveSet gOpenArchives;
 
 // cppcheck-suppress ctuOneDefinitionRuleViolation
@@ -143,14 +126,8 @@ void CreateDir( std::string const& Path )
 
 bool FileExists( char const* FileName )
 {
-    int fp = _open(FileName, OPEN_FLAGS);
-    if (fp != -1)
-    {
-        _close(fp);
-        return true;
-    }
-
-    return false;
+    std::error_code error;
+    return std::filesystem::exists(FileName, error);
 }
 
 void Usage(char* prg)

@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "source": "Retail 12.1.0.69587; Azeroth tile 32_48",
+  "maps": [
+    {
+      "sourceMapId": 0,
+      "sourceInternalName": "Azeroth",
+      "targetMapId": 902,
+      "targetInternalName": "AzerothRetailProbe",
+      "displayName": "Retail Elwynn Probe"
+    }
+  ]
+}
