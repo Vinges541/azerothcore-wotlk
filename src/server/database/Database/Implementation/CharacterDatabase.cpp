@@ -281,6 +281,20 @@ void CharacterDatabaseConnection::DoPrepareStatements()
         "FROM (SELECT 1) seed LEFT JOIN playerbots_guild_mail_receipt r ON r.ReceiptID = ? "
         "LEFT JOIN item_instance i ON i.guid = r.HeldItemGUID "
         "LEFT JOIN mail_items mi ON mi.item_guid = r.HeldItemGUID", CONNECTION_ASYNC);
+    // Bind: receipt ID. Strict detached loader projection; missing/failed reads both retain custody.
+    PrepareStatement(CHAR_SEL_GUILD_MAIL_HELD_ITEM,
+        "SELECT i.creatorGuid, i.giftCreatorGuid, i.count, i.duration, i.charges, i.flags, i.enchantments, "
+        "i.randomPropertyId, i.durability, i.playedTime, i.text, i.guid, i.itemEntry, i.owner_guid, "
+        "r.ReceiptID, r.State FROM playerbots_guild_mail_receipt r "
+        "INNER JOIN item_instance i ON i.guid = r.HeldItemGUID "
+        "WHERE r.ReceiptID = ? AND r.State IN (0, 1) AND r.DeliveryMailID = 0 "
+        "AND r.HeldItemGUID = r.SourceItemGUID AND i.owner_guid = 0 "
+        "AND i.itemEntry = r.ItemEntry AND i.count = r.ItemCount "
+        "AND NOT EXISTS (SELECT 1 FROM mail_items mi WHERE mi.item_guid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM character_inventory ci WHERE ci.item = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM character_gifts cg WHERE cg.item_guid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM item_refund_instance ir WHERE ir.item_guid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM item_soulbound_trade_data st WHERE st.itemGuid = i.guid)", CONNECTION_ASYNC);
     // Binds: state, exclusive receipt cursor. Page each recoverable state separately using its index.
     PrepareStatement(CHAR_SEL_GUILD_MAIL_RECEIPT_PAGE,
         "SELECT r.ReceiptID, r.MailID, r.SourceItemGUID, r.HeldItemGUID, r.Sender, r.Receiver, r.GuildID, "
