@@ -19,6 +19,7 @@
 #include "Common.h"
 #include "DatabaseEnv.h"
 #include "Log.h"
+#include "MailMgr.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
 #include "Realm.h"
@@ -114,6 +115,10 @@ AccountOpResult AccountMgr::DeleteAccount(uint32 accountId)
     if (!result)
         return AOR_NAME_NOT_EXIST;
 
+    auto deletionLease = sMailMgr->BeginMailboxMaintenance();
+    if (!deletionLease)
+        return AOR_DB_INTERNAL_ERROR;
+
     sScriptMgr->OnBeforeAccountDelete(accountId);
 
     // Obtain accounts characters
@@ -136,7 +141,9 @@ AccountOpResult AccountMgr::DeleteAccount(uint32 accountId)
                 s->LogoutPlayer(false);                     // logout player without waiting next session list update
             }
 
-            Player::DeleteFromDB(guid.GetCounter(), accountId, false, true);       // no need to update realm characters
+            // Do not delete the account if one of its characters could not be queued for deletion.
+            if (!Player::DeleteFromDB(guid.GetCounter(), accountId, false, true))
+                return AOR_DB_INTERNAL_ERROR;
         } while (result->NextRow());
     }
 
@@ -154,6 +161,8 @@ AccountOpResult AccountMgr::DeleteAccount(uint32 accountId)
     CharacterDatabase.Execute(stmt);
 
     LoginDatabaseTransaction trans = LoginDatabase.BeginTransaction();
+
+    trans->KeepAlive(deletionLease);
 
     loginStmt = LoginDatabase.GetPreparedStatement(LOGIN_DEL_ACCOUNT);
     loginStmt->SetData(0, accountId);

@@ -1612,7 +1612,8 @@ public:
     static void SavePositionInDB(uint32 mapid, float x, float y, float z, float o, uint32 zone, ObjectGuid guid);
     static void SavePositionInDB(WorldLocation const& loc, uint16 zoneId, ObjectGuid guid, CharacterDatabaseTransaction trans);
 
-    static void DeleteFromDB(ObjectGuid::LowType lowGuid, uint32 accountId, bool updateRealmChars, bool deleteFinally);
+    // True means deletion was queued, not that asynchronous database commits have succeeded.
+    static bool DeleteFromDB(ObjectGuid::LowType lowGuid, uint32 accountId, bool updateRealmChars, bool deleteFinally);
     static void DeleteOldCharacters();
     static void DeleteOldCharacters(uint32 keepDays);
 

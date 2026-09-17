@@ -56,6 +56,7 @@
 #include "InstanceScript.h"
 #include "LFGMgr.h"
 #include "Log.h"
+#include "MailMgr.h"
 #include "LootItemStorage.h"
 #include "MapMgr.h"
 #include "MiscPackets.h"
@@ -4069,8 +4070,12 @@ bool Player::HasActiveSpell(uint32 spell) const
  * @param updateRealmChars when this flag is set, the amount of characters on that realm will be updated in the realmlist
  * @param deleteFinally    if this flag is set, the config option will be ignored and the character will be permanently removed from the database
  */
-void Player::DeleteFromDB(ObjectGuid::LowType lowGuid, uint32 accountId, bool updateRealmChars, bool deleteFinally)
+bool Player::DeleteFromDB(ObjectGuid::LowType lowGuid, uint32 accountId, bool updateRealmChars, bool deleteFinally)
 {
+    // Deletion can return COD attachments to multiple senders; fence the whole snapshot before side effects.
+    auto deletionLease = sMailMgr->BeginMailboxMaintenance();
+    if (!deletionLease)
+        return false;
     // for not existed account avoid update realm
     if (!accountId)
         updateRealmChars = false;
@@ -4084,6 +4089,12 @@ void Player::DeleteFromDB(ObjectGuid::LowType lowGuid, uint32 accountId, bool up
     // we set it to mode CHAR_DELETE_REMOVE
     if (deleteFinally || sCharacterCache->GetCharacterLevelByGuid(playerGuid) < charDelete_minLvl)
         charDelete_method = CHAR_DELETE_REMOVE;
+
+    if (charDelete_method != CHAR_DELETE_REMOVE && charDelete_method != CHAR_DELETE_UNLINK)
+    {
+        LOG_ERROR("entities.player", "Player::DeleteFromDB: Unsupported delete method: {}.", charDelete_method);
+        return false;
+    }
 
     if (uint32 guildId = sCharacterCache->GetCharacterGuildIdByGuid(playerGuid))
         if (Guild* guild = sGuildMgr->GetGuildById(guildId))
@@ -4113,6 +4124,7 @@ void Player::DeleteFromDB(ObjectGuid::LowType lowGuid, uint32 accountId, bool up
         case CHAR_DELETE_REMOVE:
             {
                 CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+                trans->KeepAlive(deletionLease);
 
                 stmt = CharacterDatabase.GetPreparedStatement(CHAR_SEL_CHAR_COD_ITEM_MAIL);
                 stmt->SetData(0, lowGuid);
@@ -4396,12 +4408,15 @@ void Player::DeleteFromDB(ObjectGuid::LowType lowGuid, uint32 accountId, bool up
 
                 stmt->SetData(0, lowGuid);
 
-                CharacterDatabase.Execute(stmt);
+                CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+                trans->KeepAlive(deletionLease);
+                trans->Append(stmt);
+                CharacterDatabase.CommitTransaction(trans);
                 break;
             }
         default:
             LOG_ERROR("entities.player", "Player::DeleteFromDB: Unsupported delete method: {}.", charDelete_method);
-            return;
+            return false;
     }
 
     if (CharacterCacheEntry const* cache = sCharacterCache->GetCharacterCacheByGuid(playerGuid))
@@ -4414,6 +4429,7 @@ void Player::DeleteFromDB(ObjectGuid::LowType lowGuid, uint32 accountId, bool up
     {
         sWorld->UpdateRealmCharCount(accountId);
     }
+    return true;
 }
 
 /**
@@ -4433,6 +4449,12 @@ void Player::DeleteOldCharacters()
  */
 void Player::DeleteOldCharacters(uint32 keepDays)
 {
+    auto deletionLease = sMailMgr->BeginMailboxMaintenance();
+    if (!deletionLease)
+    {
+        LOG_DEBUG("entities.player", "Deferring old-character deletion while mailbox custody is active");
+        return;
+    }
     LOG_INFO("server.loading", "Player::DeleteOldChars: Deleting all characters which have been deleted {} days before...", keepDays);
     LOG_INFO("server.loading", " ");
 
@@ -4446,7 +4468,11 @@ void Player::DeleteOldCharacters(uint32 keepDays)
         do
         {
             Field* fields = result->Fetch();
-            Player::DeleteFromDB(fields[0].Get<uint32>(), fields[1].Get<uint32>(), true, true);
+            if (!Player::DeleteFromDB(fields[0].Get<uint32>(), fields[1].Get<uint32>(), true, true))
+            {
+                LOG_ERROR("entities.player", "Old-character deletion was not queued; stopping this batch");
+                break;
+            }
         } while (result->NextRow());
     }
 }

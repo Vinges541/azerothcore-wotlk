@@ -21,6 +21,7 @@
 #include "CommandScript.h"
 #include "DBCStores.h"
 #include "DatabaseEnv.h"
+#include "MailMgr.h"
 #include "ObjectAccessor.h"
 #include "ObjectMgr.h"
 #include "Player.h"
@@ -689,6 +690,12 @@ public:
      */
     static bool HandleCharacterDeletedDeleteCommand(ChatHandler* handler, std::string needle)
     {
+        auto deletionLease = sMailMgr->BeginMailboxMaintenance();
+        if (!deletionLease)
+        {
+            handler->SendErrorMessage("Mail delivery is pending. Retry character deletion later.");
+            return false;
+        }
         DeletedInfoList foundList;
         if (!GetDeletedCharacterInfoList(foundList, needle))
             return false;
@@ -704,7 +711,11 @@ public:
 
         // Call the appropriate function to delete them (current account for deleted characters is 0)
         for (DeletedInfoList::const_iterator itr = foundList.begin(); itr != foundList.end(); ++itr)
-            Player::DeleteFromDB(itr->lowGuid, 0, false, true);
+            if (!Player::DeleteFromDB(itr->lowGuid, 0, false, true))
+            {
+                handler->SendErrorMessage("Character deletion was not queued; the batch has stopped.");
+                return false;
+            }
 
         return true;
     }
@@ -720,7 +731,7 @@ public:
      *
      * @param args the search string which either contains a player GUID or a part of the character-name
      */
-    static bool HandleCharacterDeletedPurgeCommand(ChatHandler* /*handler*/, Optional<uint16> days)
+    static bool HandleCharacterDeletedPurgeCommand(ChatHandler* handler, Optional<uint16> days)
     {
         int32 keepDays = static_cast<int32>(sWorld->getIntConfig(CONFIG_CHARDELETE_KEEP_DAYS));
 
@@ -729,6 +740,12 @@ public:
         else if (keepDays <= 0) // config option value 0 -> disabled and can't be used
             return false;
 
+        auto deletionLease = sMailMgr->BeginMailboxMaintenance();
+        if (!deletionLease)
+        {
+            handler->SendErrorMessage("Mail delivery is pending. Retry character deletion later.");
+            return false;
+        }
         Player::DeleteOldCharacters(static_cast<uint32>(keepDays));
 
         return true;
@@ -743,6 +760,12 @@ public:
      */
     static bool HandleCharacterEraseCommand(ChatHandler* handler, PlayerIdentifier player)
     {
+        auto deletionLease = sMailMgr->BeginMailboxMaintenance();
+        if (!deletionLease)
+        {
+            handler->SendErrorMessage("Mail delivery is pending. Retry character deletion later.");
+            return false;
+        }
         uint32 accountId;
         if (Player* target = player.GetConnectedPlayer())
         {
@@ -757,7 +780,11 @@ public:
         std::string accountName;
         AccountMgr::GetName(accountId, accountName);
 
-        Player::DeleteFromDB(player.GetGUID().GetCounter(), accountId, true, true);
+        if (!Player::DeleteFromDB(player.GetGUID().GetCounter(), accountId, true, true))
+        {
+            handler->SendErrorMessage("Character deletion was not queued.");
+            return false;
+        }
         handler->PSendSysMessage(LANG_CHARACTER_DELETED, player.GetName(), player.GetGUID().ToString(), accountName, accountId);
 
         return true;

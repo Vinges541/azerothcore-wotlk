@@ -672,12 +672,26 @@ void WorldSession::HandleCharDeleteOpcode(WorldPacket& recvData)
         return;
     }
 
-    LOG_INFO("entities.player.character", "Account: {}, IP: {} deleted character: {}, {}, Level: {}", accountId, GetRemoteAddress(), name, guid.ToString(), level);
+    auto deletionLease = sMailMgr->BeginMailboxMaintenance();
+    if (!deletionLease)
+    {
+        sScriptMgr->OnPlayerFailedDelete(guid, initAccountId);
+        SendCharDelete(CHAR_DELETE_FAILED);
+        return;
+    }
 
     // To prevent hook failure, place hook before removing reference from DB
     sScriptMgr->OnPlayerDelete(guid, initAccountId); // To prevent race conditioning, but as it also makes sense, we hand the accountId over for successful delete.
     sCalendarMgr->RemoveAllPlayerEventsAndInvites(guid);
-    Player::DeleteFromDB(guid.GetCounter(), GetAccountId(), true, false);
+    if (!Player::DeleteFromDB(guid.GetCounter(), GetAccountId(), true, false))
+    {
+        sScriptMgr->OnPlayerFailedDelete(guid, initAccountId);
+        SendCharDelete(CHAR_DELETE_FAILED);
+        return;
+    }
+
+    LOG_INFO("entities.player.character", "Account: {}, IP: {} queued character deletion: {}, {}, Level: {}",
+        accountId, GetRemoteAddress(), name, guid.ToString(), level);
 
     sWorld->UpdateRealmCharCount(GetAccountId());
 
