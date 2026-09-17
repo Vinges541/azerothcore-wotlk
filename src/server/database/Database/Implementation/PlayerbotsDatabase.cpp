@@ -45,7 +45,20 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASK_ITEM_EXPIRY,
         "SELECT COALESCE(MAX(CAST(`time` AS UNSIGNED) + validIn), 0) FROM playerbots_guild_tasks "
         "WHERE `value` = ? AND guildid = ? AND `type` = 'itemTask'", CONNECTION_ASYNC);
-    PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER, "SELECT `value`, `time`, validIn, guildid FROM playerbots_guild_tasks WHERE owner = ? AND `type` = ?", CONNECTION_SYNCH);
+    PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER,
+        "SELECT `value`, `time`, validIn, guildid, id, `data` FROM playerbots_guild_tasks "
+        "WHERE owner = ? AND `type` = ?", CONNECTION_SYNCH);
+    PrepareStatement(PLAYERBOTS_UPD_GUILD_KILL_TASK_COMPLETE,
+        "UPDATE playerbots_guild_tasks AS task "
+        "JOIN playerbots_guild_tasks AS active_task ON active_task.owner = task.owner "
+        "AND active_task.guildid = task.guildid AND active_task.`type` = 'activeTask' "
+        "JOIN playerbots_guild_tasks AS reward ON reward.owner = task.owner "
+        "AND reward.guildid = task.guildid AND reward.`type` = 'reward' "
+        "SET task.`data` = 'kill-complete-v1', reward.`value` = 1, reward.`time` = ?, reward.validIn = ? "
+        "WHERE task.id = ? AND task.owner = ? AND task.guildid = ? AND task.`type` = 'killTask' "
+        "AND task.`value` = ? AND COALESCE(task.`data`, '') = '' AND active_task.`value` = 2 "
+        "AND CAST(task.`time` AS UNSIGNED) + task.validIn > ? "
+        "AND CAST(active_task.`time` AS UNSIGNED) + active_task.validIn > ?", CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_AND_TYPE, "SELECT `value`, `time`, validIn FROM playerbots_guild_tasks WHERE owner = ? AND guildid = ? AND `type` = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_DISTINCT, "SELECT DISTINCT guildid FROM playerbots_guild_tasks WHERE owner = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_ORDERED, "SELECT `value`, `time`, validIn, guildid FROM playerbots_guild_tasks WHERE owner = ? AND type = ? ORDER BY guildid", CONNECTION_SYNCH);
