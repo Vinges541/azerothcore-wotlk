@@ -107,6 +107,13 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
         "OR `task`.`value` <> `claim`.`CreatureEntry` OR `task`.`time` > `claim`.`EventTime` "
         "OR CAST(`task`.`time` AS UNSIGNED) + `task`.`validIn` <= `claim`.`EventTime` "
         "OR `task`.`data` = 'kill-complete-v1')", CONNECTION_ASYNC);
+    // Pre-claim lookup uses event time, not delayed callback time. NULL id is the explicit end-of-page sentinel.
+    PrepareStatement(PLAYERBOTS_SEL_GUILD_KILL_TASK_PAGE,
+        "SELECT `task`.`id`, `task`.`guildid` FROM (SELECT 1) AS `seed` LEFT JOIN "
+        "(SELECT `id`, `guildid` FROM `playerbots_guild_tasks` WHERE `owner` = ? AND `type` = 'killTask' "
+        "AND `value` = ? AND `time` <= ? AND CAST(`time` AS UNSIGNED) + `validIn` > ? "
+        "AND COALESCE(`data`, '') = '' AND `id` > ? ORDER BY `id` LIMIT 16) AS `task` "
+        "ON 1 = 1 ORDER BY `task`.`id`", CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_AND_TYPE, "SELECT `value`, `time`, validIn FROM playerbots_guild_tasks WHERE owner = ? AND guildid = ? AND `type` = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_DISTINCT, "SELECT DISTINCT guildid FROM playerbots_guild_tasks WHERE owner = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_ORDERED, "SELECT `value`, `time`, validIn, guildid FROM playerbots_guild_tasks WHERE owner = ? AND type = ? ORDER BY guildid", CONNECTION_SYNCH);
