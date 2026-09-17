@@ -218,6 +218,29 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
         "AND task.`time` <= r.EventTime AND CAST(task.`time` AS UNSIGNED) + task.validIn > r.EventTime "
         "AND active.`time` <= r.EventTime AND CAST(active.`time` AS UNSIGNED) + active.validIn > r.EventTime "
         "AND CAST(progress.`time` AS UNSIGNED) + progress.validIn > r.EventTime", CONNECTION_ASYNC);
+    // Six relevant metadata kinds; a seventh row proves corruption/duplicates. Never pick an arbitrary match.
+    // One receipt bind. NULL ReceiptID means missing ledger; non-NULL receipt with NULL TaskID means no task rows.
+    PrepareStatement(PLAYERBOTS_SEL_GUILD_MAIL_TASK_SNAPSHOT,
+        "SELECT s.ReceiptID, s.State, s.TaskID, s.TaskType, s.TaskValue, s.TaskTime, s.TaskTTL, s.TaskData "
+        "FROM (SELECT 1) seed LEFT JOIN "
+        "(SELECT r.ReceiptID, r.State, t.id TaskID, t.`type` TaskType, t.`value` TaskValue, "
+        "t.`time` TaskTime, t.validIn TaskTTL, t.`data` TaskData "
+        "FROM playerbots_guild_mail_contribution r LEFT JOIN playerbots_guild_tasks t "
+        "ON t.owner = r.Sender AND t.guildid = r.GuildID "
+        "AND t.`type` IN ('itemTask', 'itemCount', 'activeTask', 'reward', 'thanks', 'killTask') "
+        "WHERE r.ReceiptID = ? ORDER BY t.id LIMIT 7) s ON 1 = 1 ORDER BY s.TaskID", CONNECTION_ASYNC);
+    // Binds: now, receipt, now. Recheck absence inside the write; stale reads never authorize unconditional rejection.
+    // Missing auxiliary rows for a live task deliberately stay pending for reconciliation.
+    PrepareStatement(PLAYERBOTS_UPD_GUILD_MAIL_CONTRIBUTION_REJECT,
+        "UPDATE playerbots_guild_mail_contribution r LEFT JOIN playerbots_guild_tasks task "
+        "ON task.owner = r.Sender AND task.guildid = r.GuildID AND task.`type` = 'itemTask' "
+        "AND task.`value` = r.ItemEntry AND COALESCE(task.`data`, '') = '' "
+        "AND task.`time` >= 0 AND task.`time` <= r.EventTime AND task.validIn > 0 "
+        "AND CAST(task.`time` AS UNSIGNED) + task.validIn > r.EventTime "
+        "SET r.State = 2, r.UpdatedAt = GREATEST(r.UpdatedAt, ?) "
+        "WHERE r.ReceiptID = ? AND r.State = 0 AND task.id IS NULL "
+        "AND r.TaskID = 0 AND r.BeforeCount = 0 AND r.AcceptedCount = 0 AND r.PaymentCopper = 0 "
+        "AND r.EventTime > 0 AND r.EventTime <= ?", CONNECTION_ASYNC);
     // NULL ReceiptID is successful absence. Always verify payload/outcome after a duplicate-key write.
     PrepareStatement(PLAYERBOTS_SEL_GUILD_MAIL_CONTRIBUTION,
         "SELECT `r`.`ReceiptID`, `r`.`MailID`, `r`.`SourceItemGUID`, `r`.`Sender`, `r`.`Receiver`, `r`.`GuildID`, "
