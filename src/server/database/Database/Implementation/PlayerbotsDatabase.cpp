@@ -59,6 +59,25 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
         "AND task.`value` = ? AND COALESCE(task.`data`, '') = '' AND active_task.`value` = 2 "
         "AND CAST(task.`time` AS UNSIGNED) + task.validIn > ? "
         "AND CAST(active_task.`time` AS UNSIGNED) + active_task.validIn > ?", CONNECTION_ASYNC);
+    // Retries preserve the first durable payload. Callers must read it back before applying a claim:
+    // a successful duplicate-key write is not confirmation that the supplied payload was stored.
+    PrepareStatement(PLAYERBOTS_INS_GUILD_KILL_CLAIM,
+        "INSERT INTO `playerbots_guild_kill_claim` "
+        "(`TaskID`, `Owner`, `GuildID`, `CreatureEntry`, `EventTime`, `RewardDelay`) VALUES (?, ?, ?, ?, ?, ?) "
+        "ON DUPLICATE KEY UPDATE `TaskID` = `TaskID`", CONNECTION_ASYNC);
+    // A successful missing-row read returns a sentinel with NULL TaskID, unlike a failed query.
+    PrepareStatement(PLAYERBOTS_SEL_GUILD_KILL_CLAIM,
+        "SELECT `claim`.`TaskID`, `claim`.`Owner`, `claim`.`GuildID`, `claim`.`CreatureEntry`, "
+        "`claim`.`EventTime`, `claim`.`RewardDelay` FROM (SELECT 1) AS `seed` "
+        "LEFT JOIN `playerbots_guild_kill_claim` AS `claim` ON `claim`.`TaskID` = ?", CONNECTION_ASYNC);
+    // Keyset pagination bounds both work and result size. Advance only after admitting the page;
+    // NULL TaskID is an explicit end-of-scan sentinel, not a claim with record ID zero.
+    PrepareStatement(PLAYERBOTS_SEL_GUILD_KILL_CLAIM_PAGE,
+        "SELECT `claim`.`TaskID`, `claim`.`Owner`, `claim`.`GuildID`, `claim`.`CreatureEntry`, "
+        "`claim`.`EventTime`, `claim`.`RewardDelay` FROM (SELECT 1) AS `seed` LEFT JOIN "
+        "(SELECT `TaskID`, `Owner`, `GuildID`, `CreatureEntry`, `EventTime`, `RewardDelay` "
+        "FROM `playerbots_guild_kill_claim` WHERE `TaskID` > ? ORDER BY `TaskID` LIMIT 64) AS `claim` "
+        "ON 1 = 1 ORDER BY `claim`.`TaskID`", CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_AND_TYPE, "SELECT `value`, `time`, validIn FROM playerbots_guild_tasks WHERE owner = ? AND guildid = ? AND `type` = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_DISTINCT, "SELECT DISTINCT guildid FROM playerbots_guild_tasks WHERE owner = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_ORDERED, "SELECT `value`, `time`, validIn, guildid FROM playerbots_guild_tasks WHERE owner = ? AND type = ? ORDER BY guildid", CONNECTION_SYNCH);
