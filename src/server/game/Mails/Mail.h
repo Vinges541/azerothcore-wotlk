@@ -131,6 +131,8 @@ public:                                                 // Accessors
     [[nodiscard]] uint32 GetMoney() const { return m_money; }
     [[nodiscard]] uint32 GetCOD() const { return m_COD; }
     [[nodiscard]] std::string const& GetBody() const { return m_body; }
+    // Borrowed pointers for immediate hook-result validation only; never retain them across ticks.
+    [[nodiscard]] MailItemMap const& GetItems() const { return m_items; }
 
 public:                                                 // modifiers
     MailDraft& AddItem(Item* item);
@@ -138,6 +140,11 @@ public:                                                 // modifiers
     MailDraft& AddCOD(uint32 COD) { m_COD = COD; return *this; }
 
 public:                                                 // finishers
+    // Invokes scripts only. Does not apply deletion flags, generate items, send mail or append SQL.
+    // Scripts themselves may mutate the draft. A deferred sender must validate the result before executing it.
+    // SendMailTo invokes this internally; do not call both for the same delivery attempt.
+    void ApplySendHooks(MailReceiver const& receiver, MailSender const& sender, MailCheckMask& checked,
+        uint32& deliverDelay, uint32& customExpiration, bool& deleteMailItemsFromDB, bool& sendMail);
     void SendReturnToSender(uint32 sender_acc, ObjectGuid::LowType sender_guid, ObjectGuid::LowType receiver_guid, CharacterDatabaseTransaction trans);
     void SendMailTo(CharacterDatabaseTransaction trans, MailReceiver const& receiver, MailSender const& sender, MailCheckMask checked = MAIL_CHECK_MASK_NONE, uint32 deliver_delay = 0, uint32 custom_expiration = 0, bool deleteMailItemsFromDB = false, bool sendMail = true);
 

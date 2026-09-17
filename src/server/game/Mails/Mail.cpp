@@ -184,9 +184,16 @@ void MailDraft::SendReturnToSender(uint32 /*sender_acc*/, ObjectGuid::LowType se
     SendMailTo(trans, MailReceiver(receiver, receiver_guid), MailSender(MAIL_NORMAL, sender_guid), MAIL_CHECK_MASK_RETURNED, 0);
 }
 
+void MailDraft::ApplySendHooks(MailReceiver const& receiver, MailSender const& sender, MailCheckMask& checked,
+    uint32& deliverDelay, uint32& customExpiration, bool& deleteMailItemsFromDB, bool& sendMail)
+{
+    sScriptMgr->OnBeforeMailDraftSendMailTo(this, receiver, sender, checked, deliverDelay, customExpiration,
+        deleteMailItemsFromDB, sendMail);
+}
+
 void MailDraft::SendMailTo(CharacterDatabaseTransaction trans, MailReceiver const& receiver, MailSender const& sender, MailCheckMask checked, uint32 deliver_delay, uint32 custom_expiration, bool deleteMailItemsFromDB, bool sendMail)
 {
-    sScriptMgr->OnBeforeMailDraftSendMailTo(this, receiver, sender, checked, deliver_delay, custom_expiration, deleteMailItemsFromDB, sendMail);
+    ApplySendHooks(receiver, sender, checked, deliver_delay, custom_expiration, deleteMailItemsFromDB, sendMail);
 
     if (deleteMailItemsFromDB) // can be changed in the hook
         deleteIncludedItems(trans, true);
