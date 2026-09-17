@@ -78,6 +78,35 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
         "(SELECT `TaskID`, `Owner`, `GuildID`, `CreatureEntry`, `EventTime`, `RewardDelay` "
         "FROM `playerbots_guild_kill_claim` WHERE `TaskID` > ? ORDER BY `TaskID` LIMIT 64) AS `claim` "
         "ON 1 = 1 ORDER BY `claim`.`TaskID`", CONNECTION_ASYNC);
+    PrepareStatement(PLAYERBOTS_UPD_GUILD_KILL_CLAIM_APPLY,
+        "UPDATE `playerbots_guild_tasks` AS `task` "
+        "JOIN `playerbots_guild_kill_claim` AS `claim` ON `claim`.`TaskID` = `task`.`id` "
+        "AND `claim`.`Owner` = `task`.`owner` AND `claim`.`GuildID` = `task`.`guildid` "
+        "AND `claim`.`CreatureEntry` = `task`.`value` "
+        "JOIN `playerbots_guild_tasks` AS `active` ON `active`.`owner` = `task`.`owner` "
+        "AND `active`.`guildid` = `task`.`guildid` AND `active`.`type` = 'activeTask' "
+        "JOIN `playerbots_guild_tasks` AS `reward` ON `reward`.`owner` = `task`.`owner` "
+        "AND `reward`.`guildid` = `task`.`guildid` AND `reward`.`type` = 'reward' "
+        "SET `task`.`data` = 'kill-complete-v1', `reward`.`value` = 1, "
+        "`reward`.`time` = `claim`.`EventTime`, `reward`.`validIn` = `claim`.`RewardDelay` "
+        "WHERE `claim`.`TaskID` = ? AND `claim`.`Owner` = ? AND `claim`.`GuildID` = ? "
+        "AND `claim`.`CreatureEntry` = ? AND `claim`.`EventTime` = ? AND `claim`.`RewardDelay` = ? "
+        "AND `task`.`type` = 'killTask' AND COALESCE(`task`.`data`, '') = '' AND `active`.`value` = 2 "
+        "AND `task`.`time` <= `claim`.`EventTime` AND `active`.`time` <= `claim`.`EventTime` "
+        "AND CAST(`task`.`time` AS UNSIGNED) + `task`.`validIn` > `claim`.`EventTime` "
+        "AND CAST(`active`.`time` AS UNSIGNED) + `active`.`validIn` > `claim`.`EventTime`", CONNECTION_ASYNC);
+    // Run in the same transaction after APPLY. Missing reward/active rows alone do not retire evidence.
+    // Retirement means reconciled (applied, already applied or stale), not that mail was delivered.
+    PrepareStatement(PLAYERBOTS_DEL_GUILD_KILL_CLAIM_RETIRED,
+        "DELETE `claim` FROM `playerbots_guild_kill_claim` AS `claim` "
+        "LEFT JOIN `playerbots_guild_tasks` AS `task` ON `task`.`id` = `claim`.`TaskID` "
+        "WHERE `claim`.`TaskID` = ? AND `claim`.`Owner` = ? AND `claim`.`GuildID` = ? "
+        "AND `claim`.`CreatureEntry` = ? AND `claim`.`EventTime` = ? AND `claim`.`RewardDelay` = ? "
+        "AND (`task`.`id` IS NULL OR `task`.`owner` <> `claim`.`Owner` "
+        "OR `task`.`guildid` <> `claim`.`GuildID` OR `task`.`type` <> 'killTask' "
+        "OR `task`.`value` <> `claim`.`CreatureEntry` OR `task`.`time` > `claim`.`EventTime` "
+        "OR CAST(`task`.`time` AS UNSIGNED) + `task`.`validIn` <= `claim`.`EventTime` "
+        "OR `task`.`data` = 'kill-complete-v1')", CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_AND_TYPE, "SELECT `value`, `time`, validIn FROM playerbots_guild_tasks WHERE owner = ? AND guildid = ? AND `type` = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_DISTINCT, "SELECT DISTINCT guildid FROM playerbots_guild_tasks WHERE owner = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_ORDERED, "SELECT `value`, `time`, validIn, guildid FROM playerbots_guild_tasks WHERE owner = ? AND type = ? ORDER BY guildid", CONNECTION_SYNCH);
