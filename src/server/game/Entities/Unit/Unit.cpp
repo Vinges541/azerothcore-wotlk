@@ -14248,7 +14248,8 @@ void Unit::Kill(Unit* killer, Unit* victim, bool durabilityLoss, WeaponAttackTyp
             }
         }
 
-        sScriptMgr->OnPlayerbotCheckKillTask(player, victim);
+        if (isRewardAllowed && player && player != victim)
+            sScriptMgr->OnPlayerbotCheckKillTask(player, victim);
 
         // Dungeon specific stuff, only applies to players killing creatures
         if (creature->GetInstanceId())
