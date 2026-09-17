@@ -41,6 +41,10 @@ public:
     // Calls never wait for SQL. A conflicting operation must retry later.
     std::shared_ptr<void> BeginMailboxLoad(ObjectGuid character);
 
+    // Expiry snapshots cover many characters. Hold this before reading and through all resulting SQL writes.
+    // Busy custody makes maintenance retry later, without scanning every receipt or blocking a thread.
+    std::shared_ptr<void> BeginMailboxMaintenance();
+
     // Acquire both participants atomically before asynchronous custody work. Zero means busy/invalid.
     // No timeout: an uncertain commit must retain the token through recovery and native reconciliation.
     uint64 BeginMailboxMutation(ObjectGuid first, ObjectGuid second);
@@ -90,8 +94,9 @@ public:
     /**
      * @brief Returns expired mail with items to the sender and deletes the rest.
      * @param serverUp When true, receivers that are currently online are skipped.
+     * @return False when custody deferred the attempt; the world scheduler should retry soon.
      */
-    void ReturnOrDeleteOldMails(bool serverUp);
+    bool ReturnOrDeleteOldMails(bool serverUp);
 
 private:
     struct MailboxAccess
@@ -100,6 +105,7 @@ private:
         std::map<ObjectGuid, uint32> loads;
         std::map<ObjectGuid, uint64> mutations;
         uint64 serial = 0;
+        uint32 maintenance = 0;
     };
     // Query holders can outlive singleton destruction during shutdown; leases own this state, not MailMgr.
     std::shared_ptr<MailboxAccess> mailboxAccess = std::make_shared<MailboxAccess>();

@@ -1209,8 +1209,8 @@ void World::Update(uint32 diff)
 
     if (currentGameTime > _mail_expire_check_timer)
     {
-        sMailMgr->ReturnOrDeleteOldMails(true);
-        _mail_expire_check_timer = currentGameTime + 6h;
+        bool processed = sMailMgr->ReturnOrDeleteOldMails(true);
+        _mail_expire_check_timer = currentGameTime + (processed ? 6h : 1min);
     }
 
     {

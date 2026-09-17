@@ -56,6 +56,22 @@ std::shared_ptr<void> MailMgr::BeginMailboxLoad(ObjectGuid character)
     });
 }
 
+std::shared_ptr<void> MailMgr::BeginMailboxMaintenance()
+{
+    auto state = mailboxAccess;
+    {
+        std::lock_guard<std::mutex> guard(state->mutex);
+        if (!state->mutations.empty() || state->maintenance == std::numeric_limits<uint32>::max())
+            return {};
+        ++state->maintenance;
+    }
+    return std::shared_ptr<void>(state.get(), [state](void*)
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        --state->maintenance;
+    });
+}
+
 uint64 MailMgr::BeginMailboxMutation(ObjectGuid first, ObjectGuid second)
 {
     if (!first.IsPlayer() || !second.IsPlayer() || first == second)
@@ -63,7 +79,8 @@ uint64 MailMgr::BeginMailboxMutation(ObjectGuid first, ObjectGuid second)
     auto& state = *mailboxAccess;
     std::lock_guard<std::mutex> guard(state.mutex);
     // At most 512 simultaneous two-character operations; live tokens are never evicted.
-    if (state.mutations.size() >= 1024 || state.serial == std::numeric_limits<uint64>::max() ||
+    if (state.maintenance || state.mutations.size() >= 1024 ||
+        state.serial == std::numeric_limits<uint64>::max() ||
         state.loads.contains(first) || state.loads.contains(second) ||
         state.mutations.contains(first) || state.mutations.contains(second))
         return 0;
@@ -135,8 +152,14 @@ void MailMgr::DeleteEmptyExpiredMail(uint32 mailId, ObjectGuid::LowType receiver
     OnMailDeleted(receiverLow);
 }
 
-void MailMgr::ReturnOrDeleteOldMails(bool serverUp)
+bool MailMgr::ReturnOrDeleteOldMails(bool serverUp)
 {
+    auto maintenanceLease = BeginMailboxMaintenance();
+    if (!maintenanceLease)
+    {
+        LOG_DEBUG("server.mail", "Deferring expired-mail cleanup while mailbox custody is active");
+        return false;
+    }
     uint32 oldMSTime = getMSTime();
 
     time_t curTime = GameTime::GetGameTime().count();
@@ -145,7 +168,7 @@ void MailMgr::ReturnOrDeleteOldMails(bool serverUp)
     stmt->SetData(0, uint32(curTime));
     PreparedQueryResult result = CharacterDatabase.Query(stmt);
     if (!result)
-        return;
+        return true;
 
     std::map<uint32 /*messageId*/, MailItemInfoVec> itemsCache;
     stmt = CharacterDatabase.GetPreparedStatement(CHAR_SEL_EXPIRED_MAIL_ITEMS);
@@ -192,6 +215,7 @@ void MailMgr::ReturnOrDeleteOldMails(bool serverUp)
 
         // Keep each mail's correlated writes atomic
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        trans->KeepAlive(maintenanceLease);
 
         // Delete or return mail
         if (has_items)
@@ -262,4 +286,5 @@ void MailMgr::ReturnOrDeleteOldMails(bool serverUp)
 
     LOG_INFO("server.loading", ">> Processed {} expired mails: {} deleted and {} returned in {} ms", deletedCount + returnedCount, deletedCount, returnedCount, GetMSTimeDiffToNow(oldMSTime));
     LOG_INFO("server.loading", " ");
+    return true;
 }
