@@ -125,6 +125,77 @@ void CharacterDatabaseConnection::DoPrepareStatements()
     PrepareStatement(CHAR_DEL_MAIL_BY_ID, "DELETE FROM mail WHERE id = ?", CONNECTION_ASYNC);
     PrepareStatement(CHAR_INS_MAIL_ITEM, "INSERT INTO mail_items(mail_id, item_guid, receiver) VALUES (?, ?, ?)", CONNECTION_ASYNC);
     PrepareStatement(CHAR_DEL_MAIL_ITEM, "DELETE FROM mail_items WHERE item_guid = ?", CONNECTION_ASYNC);
+
+    // Custody protocol, not used by legacy mail actions. One transaction must lock source/link/item,
+    // insert the receipt, transfer ownership, unlink and update the source header, in that order.
+    // A successful transaction can still be a conditional no-op: read back custody before crediting tasks.
+    PrepareStatement(CHAR_LOCK_GUILD_MAIL_SOURCE,
+        "UPDATE mail SET id = id WHERE id = ?", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_LOCK_GUILD_MAIL_LINK,
+        "UPDATE mail_items SET item_guid = item_guid WHERE item_guid = ?", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_LOCK_GUILD_MAIL_ITEM,
+        "UPDATE item_instance SET guid = guid WHERE guid = ?", CONNECTION_ASYNC);
+    // Binds: guild, event, updatedAt, mail, item, sender, receiver, entry, count, event, event.
+    // Duplicate live custody must fail the transaction, never overwrite an earlier receipt's payload.
+    PrepareStatement(CHAR_INS_GUILD_MAIL_RECEIPT,
+        "INSERT INTO playerbots_guild_mail_receipt "
+        "(MailID, SourceItemGUID, HeldItemGUID, Sender, Receiver, GuildID, ItemEntry, ItemCount, EventTime, UpdatedAt) "
+        "SELECT m.id, i.guid, i.guid, m.sender, m.receiver, ?, i.itemEntry, i.count, ?, ? "
+        "FROM mail m INNER JOIN mail_items mi ON mi.mail_id = m.id AND mi.receiver = m.receiver "
+        "INNER JOIN item_instance i ON i.guid = mi.item_guid AND i.owner_guid = m.receiver "
+        "WHERE m.id = ? AND i.guid = ? AND m.sender = ? AND m.receiver = ? "
+        "AND i.itemEntry = ? AND i.count = ? AND i.count > 0 "
+        "AND m.messageType = 0 AND m.money = 0 AND m.cod = 0 "
+        "AND m.deliver_time <= ? AND m.expire_time > ?", CONNECTION_ASYNC);
+    // Binds for custody and unlink: item, mail, receiver, original event. Preserve the full item_instance.
+    // Owner zero keeps the escrowed item outside character-deletion-by-owner; it is NOT an inventory item.
+    PrepareStatement(CHAR_UPD_GUILD_MAIL_CUSTODY,
+        "UPDATE item_instance i INNER JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = i.guid "
+        "INNER JOIN mail_items mi ON mi.item_guid = i.guid AND mi.mail_id = r.MailID "
+        "AND mi.receiver = r.Receiver "
+        "SET i.owner_guid = 0 "
+        "WHERE r.HeldItemGUID = ? AND r.MailID = ? AND r.Receiver = ? AND r.EventTime = ? "
+        "AND r.State = 0 AND r.SourceItemGUID = i.guid AND i.owner_guid = r.Receiver "
+        "AND i.itemEntry = r.ItemEntry AND i.count = r.ItemCount", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_DEL_GUILD_MAIL_SOURCE_LINK,
+        "DELETE mi FROM mail_items mi "
+        "INNER JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = mi.item_guid "
+        "AND r.MailID = mi.mail_id AND r.Receiver = mi.receiver "
+        "INNER JOIN item_instance i ON i.guid = r.HeldItemGUID "
+        "WHERE r.HeldItemGUID = ? AND r.MailID = ? AND r.Receiver = ? AND r.EventTime = ? "
+        "AND r.State = 0 AND r.SourceItemGUID = i.guid AND i.owner_guid = 0 "
+        "AND i.itemEntry = r.ItemEntry AND i.count = r.ItemCount", CONNECTION_ASYNC);
+    // Binds: source mail, receiver. Other attachments and the original message body remain untouched.
+    PrepareStatement(CHAR_UPD_GUILD_MAIL_SOURCE_EMPTY,
+        "UPDATE mail m LEFT JOIN mail_items mi ON mi.mail_id = m.id SET m.has_items = 0 "
+        "WHERE m.id = ? AND m.receiver = ? AND mi.item_guid IS NULL", CONNECTION_ASYNC);
+    // Successful absence has a NULL ReceiptID row; a failed query must never be treated as absence.
+    // Last four columns prove physical custody: owner, entry, count, remaining source link (must be NULL).
+    PrepareStatement(CHAR_SEL_GUILD_MAIL_RECEIPT_BY_ITEM,
+        "SELECT r.ReceiptID, r.MailID, r.SourceItemGUID, r.HeldItemGUID, r.Sender, r.Receiver, r.GuildID, "
+        "r.ItemEntry, r.ItemCount, r.EventTime, r.State, r.TaskID, r.AcceptedCount, r.PaymentCopper, "
+        "r.DeliveryMailID, r.UpdatedAt, i.owner_guid, i.itemEntry, i.count, mi.mail_id "
+        "FROM (SELECT 1) seed LEFT JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = ? "
+        "LEFT JOIN item_instance i ON i.guid = r.HeldItemGUID "
+        "LEFT JOIN mail_items mi ON mi.item_guid = r.HeldItemGUID", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_SEL_GUILD_MAIL_RECEIPT,
+        "SELECT r.ReceiptID, r.MailID, r.SourceItemGUID, r.HeldItemGUID, r.Sender, r.Receiver, r.GuildID, "
+        "r.ItemEntry, r.ItemCount, r.EventTime, r.State, r.TaskID, r.AcceptedCount, r.PaymentCopper, "
+        "r.DeliveryMailID, r.UpdatedAt, i.owner_guid, i.itemEntry, i.count, mi.mail_id "
+        "FROM (SELECT 1) seed LEFT JOIN playerbots_guild_mail_receipt r ON r.ReceiptID = ? "
+        "LEFT JOIN item_instance i ON i.guid = r.HeldItemGUID "
+        "LEFT JOIN mail_items mi ON mi.item_guid = r.HeldItemGUID", CONNECTION_ASYNC);
+    // Binds: state, exclusive receipt cursor. Page each recoverable state separately using its index.
+    PrepareStatement(CHAR_SEL_GUILD_MAIL_RECEIPT_PAGE,
+        "SELECT r.ReceiptID, r.MailID, r.SourceItemGUID, r.HeldItemGUID, r.Sender, r.Receiver, r.GuildID, "
+        "r.ItemEntry, r.ItemCount, r.EventTime, r.State, r.TaskID, r.AcceptedCount, r.PaymentCopper, "
+        "r.DeliveryMailID, r.UpdatedAt, i.owner_guid, i.itemEntry, i.count, mi.mail_id "
+        "FROM (SELECT 1) seed LEFT JOIN "
+        "(SELECT * FROM playerbots_guild_mail_receipt WHERE State = ? AND ReceiptID > ? "
+        "ORDER BY ReceiptID LIMIT 64) r ON 1 = 1 "
+        "LEFT JOIN item_instance i ON i.guid = r.HeldItemGUID "
+        "LEFT JOIN mail_items mi ON mi.item_guid = r.HeldItemGUID ORDER BY r.ReceiptID", CONNECTION_ASYNC);
+
     PrepareStatement(CHAR_DEL_INVALID_MAIL_ITEM, "DELETE FROM mail_items WHERE item_guid = ?", CONNECTION_ASYNC);
     PrepareStatement(CHAR_SEL_EXPIRED_MAIL, "SELECT id, messageType, sender, receiver, has_items, expire_time, stationery, checked, mailTemplateId FROM mail WHERE expire_time < ?", CONNECTION_SYNCH);
     PrepareStatement(CHAR_SEL_EXPIRED_MAIL_ITEMS, "SELECT item_guid, itemEntry, mail_id FROM mail_items mi INNER JOIN item_instance ii ON ii.guid = mi.item_guid LEFT JOIN mail mm ON mi.mail_id = mm.id WHERE mm.id IS NOT NULL AND mm.expire_time < ?", CONNECTION_SYNCH);
