@@ -150,6 +150,10 @@ void CharacterDatabaseConnection::DoPrepareStatements()
         "INNER JOIN item_instance i ON i.guid = mi.item_guid AND i.owner_guid = m.receiver "
         "WHERE m.id = ? AND i.guid = ? AND m.sender = ? AND m.receiver = ? "
         "AND i.itemEntry = ? AND i.count = ? AND i.count > 0 "
+        "AND NOT EXISTS (SELECT 1 FROM character_gifts g WHERE g.item_guid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM item_refund_instance rf WHERE rf.item_guid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM item_soulbound_trade_data tr WHERE tr.itemGuid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM character_inventory inv WHERE inv.item = i.guid) "
         "AND m.messageType = 0 AND m.money = 0 AND m.cod = 0 "
         "AND m.deliver_time <= ? AND m.expire_time > ?", CONNECTION_ASYNC);
     // Binds for custody and unlink: item, mail, receiver, original event. Preserve the full item_instance.
@@ -207,6 +211,10 @@ void CharacterDatabaseConnection::DoPrepareStatements()
         "AND r.HeldItemGUID = r.SourceItemGUID AND r.ItemCount > 0 AND r.AcceptedCount <= r.ItemCount "
         "AND p.MailID BETWEEN 1 AND 4294967294 AND r.PaymentCopper <= 2147483646 "
         "AND mi.item_guid IS NULL AND m.id IS NULL "
+        "AND NOT EXISTS (SELECT 1 FROM character_gifts g WHERE g.item_guid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM item_refund_instance rf WHERE rf.item_guid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM item_soulbound_trade_data tr WHERE tr.itemGuid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM character_inventory inv WHERE inv.item = i.guid) "
         "AND i.owner_guid = 0 AND i.itemEntry = r.ItemEntry AND i.count = r.ItemCount", CONNECTION_ASYNC);
     // Binds: subject, body, expire time, deliver time, receipt ID, reserved mail ID.
     // Always send a receipt, including full acceptance with zero payment. RETURNED prevents return loops.
