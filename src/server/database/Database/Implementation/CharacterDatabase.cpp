@@ -169,6 +169,24 @@ void CharacterDatabaseConnection::DoPrepareStatements()
     PrepareStatement(CHAR_UPD_GUILD_MAIL_SOURCE_EMPTY,
         "UPDATE mail m LEFT JOIN mail_items mi ON mi.mail_id = m.id SET m.has_items = 0 "
         "WHERE m.id = ? AND m.receiver = ? AND mi.item_guid IS NULL", CONNECTION_ASYNC);
+    // Persist a verified Playerbots ledger outcome, WITHOUT consuming the item or sending money.
+    // Binds: task, accepted, payment, now; receipt, mail, item, sender, receiver, guild, entry, count, event.
+    // Repeated calls cannot replace a resolved outcome. Readback must match it before finalization.
+    PrepareStatement(CHAR_UPD_GUILD_MAIL_RECEIPT_RESOLVE,
+        "UPDATE playerbots_guild_mail_receipt r JOIN item_instance i ON i.guid = r.HeldItemGUID "
+        "JOIN (SELECT CAST(? AS UNSIGNED) TaskID, CAST(? AS UNSIGNED) AcceptedCount, "
+        "CAST(? AS UNSIGNED) PaymentCopper, CAST(? AS UNSIGNED) ResolvedAt) p ON 1 = 1 "
+        "LEFT JOIN mail_items mi ON mi.item_guid = r.HeldItemGUID "
+        "SET r.State = 1, r.TaskID = p.TaskID, r.AcceptedCount = p.AcceptedCount, "
+        "r.PaymentCopper = p.PaymentCopper, r.UpdatedAt = GREATEST(r.UpdatedAt, p.ResolvedAt) "
+        "WHERE r.ReceiptID = ? AND r.MailID = ? AND r.SourceItemGUID = ? AND r.Sender = ? "
+        "AND r.Receiver = ? AND r.GuildID = ? AND r.ItemEntry = ? AND r.ItemCount = ? AND r.EventTime = ? "
+        "AND r.State = 0 AND r.TaskID = 0 AND r.AcceptedCount = 0 AND r.PaymentCopper = 0 "
+        "AND r.DeliveryMailID = 0 AND r.HeldItemGUID = r.SourceItemGUID AND mi.item_guid IS NULL "
+        "AND i.owner_guid = 0 AND i.itemEntry = r.ItemEntry AND i.count = r.ItemCount "
+        "AND p.ResolvedAt >= r.EventTime AND p.AcceptedCount <= r.ItemCount AND p.PaymentCopper <= 2147483646 "
+        "AND ((p.AcceptedCount = 0 AND p.TaskID = 0 AND p.PaymentCopper = 0) "
+        "OR (p.AcceptedCount > 0 AND p.TaskID BETWEEN 1 AND 2147483647))", CONNECTION_ASYNC);
     // Successful absence has a NULL ReceiptID row; a failed query must never be treated as absence.
     // Last four columns prove physical custody: owner, entry, count, remaining source link (must be NULL).
     PrepareStatement(CHAR_SEL_GUILD_MAIL_RECEIPT_BY_ITEM,
