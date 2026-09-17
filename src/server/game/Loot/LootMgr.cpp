@@ -29,6 +29,10 @@
 #include "SpellMgr.h"
 #include "Util.h"
 #include "World.h"
+#include <algorithm>
+#include <cmath>
+#include <cstdlib>
+#include <limits>
 
 ServerConfigs const qualityToRate[] =
 {
@@ -91,7 +95,7 @@ private:
     uint16 _lootMode;
 };
 
-class LootTemplate::LootGroup                               // A set of loot definitions for items (refs are not allowed)
+class LootTemplate::LootGroup                               // Grouped items and references
 {
 public:
     LootGroup() { }
@@ -110,6 +114,8 @@ public:
     void CheckLootRefs(LootStore const& lootstore, uint32 Id, LootIdSet* ref_set) const;
     LootStoreItemList* GetExplicitlyChancedItemList() { return &ExplicitlyChanced; }
     LootStoreItemList* GetEqualChancedItemList() { return &EqualChanced; }
+    LootStoreItemList const& GetExplicitlyChancedItems() const { return ExplicitlyChanced; }
+    LootStoreItemList const& GetEqualChancedItems() const { return EqualChanced; }
     void CopyConditions(ConditionList conditions);
 private:
     LootStoreItemList ExplicitlyChanced;                // Entries with chances defined in DB
@@ -252,6 +258,13 @@ LootTemplate const* LootStore::GetLootFor(uint32 loot_id) const
         return nullptr;
 
     return tab->second;
+}
+
+bool LootStore::CollectUnconditionalItemIds(uint32 lootId, std::vector<uint32>& items, uint16 lootMode) const
+{
+    items.clear();
+    LootTemplate const* loot = GetLootFor(lootId);
+    return loot && loot->CollectUnconditionalItemIds(items, LootTemplates_Reference.m_LootTemplates, lootMode);
 }
 
 LootTemplate* LootStore::GetLootForConditionFill(uint32 loot_id) const
@@ -1547,6 +1560,72 @@ void LootTemplate::AddEntry(LootStoreItem* item)
     }
     else                                            // Non-grouped entries
         Entries.push_back(item);
+}
+
+bool LootTemplate::CollectUnconditionalItemIds(std::vector<uint32>& items, LootTemplateMap const& references,
+                                             uint16 lootMode) const
+{
+    items.clear();
+    std::size_t remaining = 4096;
+    std::vector<LootTemplate const*> path;
+    path.reserve(32);
+    auto const consume = [&]()
+    {
+        if (!remaining)
+            return false;
+        --remaining;
+        return true;
+    };
+    auto const visit = [&](auto const& self, LootTemplate const& loot) -> bool
+    {
+        if (!consume() || path.size() >= 32 || std::find(path.begin(), path.end(), &loot) != path.end())
+            return false;
+        path.push_back(&loot);
+        auto const entries = [&](LootStoreItemList const& list, bool grouped)
+        {
+            for (LootStoreItem const* item : list)
+            {
+                if (!consume() || !item)
+                    return false;
+                if (!(item->lootmode & lootMode) || item->needs_quest || !item->conditions.empty() ||
+                    !item->maxcount || !std::isfinite(item->chance) || item->chance < 0.0f ||
+                    (!grouped && item->chance == 0.0f))
+                    continue;
+                if (item->reference)
+                {
+                    if (item->reference == std::numeric_limits<int32>::min())
+                        return false;
+                    auto const found = references.find(uint32(std::abs(item->reference)));
+                    // AddEntry puts nonzero groupid in Groups. Group::Process enters references with groupId=0.
+                    if (found == references.end() || !found->second || !self(self, *found->second))
+                        return false;
+                }
+                else if (item->itemid && item->mincount)
+                    items.push_back(item->itemid);
+            }
+            return true;
+        };
+        if (!entries(loot.Entries, false))
+            return false;
+        for (LootGroup const* group : loot.Groups)
+        {
+            if (!consume())
+                return false;
+            if (group && (!entries(group->GetExplicitlyChancedItems(), true) ||
+                          !entries(group->GetEqualChancedItems(), true)))
+                return false;
+        }
+        path.pop_back();
+        return true;
+    };
+    if (!visit(visit, *this))
+    {
+        items.clear();
+        return false;
+    }
+    std::sort(items.begin(), items.end());
+    items.erase(std::unique(items.begin(), items.end()), items.end());
+    return true;
 }
 
 void LootTemplate::CopyConditions(ConditionList conditions)

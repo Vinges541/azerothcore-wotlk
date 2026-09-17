@@ -228,6 +228,10 @@ public:
     [[nodiscard]] LootTemplate const* GetLootFor(uint32 loot_id) const;
     [[nodiscard]] LootTemplate* GetLootForConditionFill(uint32 loot_id) const;
 
+    // Read-only catalog hint; see LootTemplate::CollectUnconditionalItemIds. Missing templates return false.
+    [[nodiscard]] bool CollectUnconditionalItemIds(uint32 lootId, std::vector<uint32>& items,
+                                                  uint16 lootMode = LOOT_MODE_DEFAULT) const;
+
     [[nodiscard]] char const* GetName() const { return m_name; }
     [[nodiscard]] char const* GetEntryName() const { return m_entryName; }
     [[nodiscard]] bool IsRatesAllowed() const { return m_ratesAllowed; }
@@ -243,7 +247,7 @@ private:
 
 class LootTemplate
 {
-    class LootGroup;                                       // A set of loot definitions for items (refs are not allowed inside)
+    class LootGroup;                                       // Grouped items and references
     typedef std::vector<LootGroup*> LootGroups;
 
 public:
@@ -252,6 +256,11 @@ public:
 
     // Adds an entry to the group (at loading stage)
     void AddEntry(LootStoreItem* item);
+    // Sorted unique candidate IDs, including groups/references, excluding quest/conditional rows.
+    // No rolls, hooks, rates, Player checks or item grants. This is not a guarantee or permission to loot.
+    // Replaces items; clears it and returns false on missing/cyclic references or the 4096-work/32-depth limit.
+    [[nodiscard]] bool CollectUnconditionalItemIds(std::vector<uint32>& items, LootTemplateMap const& references,
+                                                  uint16 lootMode = LOOT_MODE_DEFAULT) const;
     // Rolls for every item in the template and adds the rolled items the the loot
     void Process(Loot& loot, LootStore const& store, uint16 lootMode, Player const* player, uint8 groupId = 0, bool isTopLevel = true) const;
     void CopyConditions(ConditionList conditions);
