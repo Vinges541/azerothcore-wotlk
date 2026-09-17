@@ -187,6 +187,63 @@ void CharacterDatabaseConnection::DoPrepareStatements()
         "AND p.ResolvedAt >= r.EventTime AND p.AcceptedCount <= r.ItemCount AND p.PaymentCopper <= 2147483646 "
         "AND ((p.AcceptedCount = 0 AND p.TaskID = 0 AND p.PaymentCopper = 0) "
         "OR (p.AcceptedCount > 0 AND p.TaskID BETWEEN 1 AND 2147483647))", CONNECTION_ASYNC);
+    // Delivery is one transaction: reserve -> mail -> return item/link -> consume full stack -> terminal marker.
+    // Reservation is not a separately committed stage. Every subsequent statement requires the same mail ID.
+    // Native integration must validate hooks/items, fence RAM and publish only after durable terminal readback.
+    // Binds: fresh mail ID, receipt ID, task ID, accepted count, payment.
+    PrepareStatement(CHAR_UPD_GUILD_MAIL_DELIVERY_RESERVE,
+        "UPDATE playerbots_guild_mail_receipt r JOIN item_instance i ON i.guid = r.HeldItemGUID "
+        "JOIN characters c ON c.guid = r.Sender AND c.deleteDate IS NULL AND c.deleteInfos_Name IS NULL "
+        "JOIN (SELECT CAST(? AS UNSIGNED) MailID) p ON 1 = 1 "
+        "LEFT JOIN mail_items mi ON mi.item_guid = r.HeldItemGUID LEFT JOIN mail m ON m.id = p.MailID "
+        "SET r.DeliveryMailID = p.MailID "
+        "WHERE r.ReceiptID = ? AND r.State = 1 AND r.DeliveryMailID = 0 "
+        "AND r.TaskID = ? AND r.AcceptedCount = ? AND r.PaymentCopper = ? "
+        "AND r.HeldItemGUID = r.SourceItemGUID AND r.ItemCount > 0 AND r.AcceptedCount <= r.ItemCount "
+        "AND p.MailID BETWEEN 1 AND 4294967294 AND r.PaymentCopper <= 2147483646 "
+        "AND mi.item_guid IS NULL AND m.id IS NULL "
+        "AND i.owner_guid = 0 AND i.itemEntry = r.ItemEntry AND i.count = r.ItemCount", CONNECTION_ASYNC);
+    // Binds: subject, body, expire time, deliver time, receipt ID, reserved mail ID.
+    // Always send a receipt, including full acceptance with zero payment. RETURNED prevents return loops.
+    PrepareStatement(CHAR_INS_GUILD_MAIL_DELIVERY,
+        "INSERT INTO mail (id, messageType, stationery, mailTemplateId, sender, receiver, subject, body, "
+        "has_items, expire_time, deliver_time, money, cod, checked) "
+        "SELECT r.DeliveryMailID, 0, 41, 0, r.Receiver, r.Sender, ?, ?, "
+        "r.ItemCount > r.AcceptedCount, ?, ?, r.PaymentCopper, 0, 2 "
+        "FROM playerbots_guild_mail_receipt r WHERE r.ReceiptID = ? AND r.DeliveryMailID = ? "
+        "AND r.State = 1 AND r.DeliveryMailID > 0", CONNECTION_ASYNC);
+    // Remaining delivery statements bind receipt ID and reserved mail ID (terminal adds updatedAt first).
+    // Preserve the original item GUID and all instance data when returning the excess.
+    PrepareStatement(CHAR_UPD_GUILD_MAIL_RETURN_ITEM,
+        "UPDATE item_instance i JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = i.guid "
+        "JOIN mail m ON m.id = r.DeliveryMailID AND m.receiver = r.Sender "
+        "SET i.`count` = r.ItemCount - r.AcceptedCount, i.owner_guid = r.Sender "
+        "WHERE r.ReceiptID = ? AND r.DeliveryMailID = ? AND r.State = 1 AND r.AcceptedCount < r.ItemCount "
+        "AND i.owner_guid = 0 AND i.itemEntry = r.ItemEntry AND i.`count` = r.ItemCount", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_INS_GUILD_MAIL_RETURN_LINK,
+        "INSERT INTO mail_items (mail_id, item_guid, receiver) "
+        "SELECT r.DeliveryMailID, r.HeldItemGUID, r.Sender FROM playerbots_guild_mail_receipt r "
+        "JOIN item_instance i ON i.guid = r.HeldItemGUID "
+        "JOIN mail m ON m.id = r.DeliveryMailID AND m.receiver = r.Sender "
+        "WHERE r.ReceiptID = ? AND r.DeliveryMailID = ? AND r.State = 1 AND r.AcceptedCount < r.ItemCount "
+        "AND i.owner_guid = r.Sender AND i.itemEntry = r.ItemEntry "
+        "AND i.`count` = r.ItemCount - r.AcceptedCount", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_DEL_GUILD_MAIL_CONSUMED_ITEM,
+        "DELETE i FROM item_instance i JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = i.guid "
+        "JOIN mail m ON m.id = r.DeliveryMailID AND m.receiver = r.Sender "
+        "WHERE r.ReceiptID = ? AND r.DeliveryMailID = ? AND r.State = 1 AND r.AcceptedCount = r.ItemCount "
+        "AND i.owner_guid = 0 AND i.itemEntry = r.ItemEntry AND i.`count` = r.ItemCount", CONNECTION_ASYNC);
+    PrepareStatement(CHAR_UPD_GUILD_MAIL_DELIVERED,
+        "UPDATE playerbots_guild_mail_receipt r LEFT JOIN item_instance i ON i.guid = r.HeldItemGUID "
+        "LEFT JOIN mail_items mi ON mi.item_guid = r.HeldItemGUID JOIN mail m ON m.id = r.DeliveryMailID "
+        "SET r.State = 2, r.HeldItemGUID = NULL, r.UpdatedAt = GREATEST(r.UpdatedAt, ?) "
+        "WHERE r.ReceiptID = ? AND r.DeliveryMailID = ? AND r.State = 1 "
+        "AND m.sender = r.Receiver AND m.receiver = r.Sender AND m.money = r.PaymentCopper AND m.cod = 0 "
+        "AND m.messageType = 0 AND m.checked = 2 AND m.has_items = (r.ItemCount > r.AcceptedCount) "
+        "AND ((r.AcceptedCount = r.ItemCount AND i.guid IS NULL AND mi.item_guid IS NULL) "
+        "OR (r.AcceptedCount < r.ItemCount AND i.owner_guid = r.Sender AND i.itemEntry = r.ItemEntry "
+        "AND i.`count` = r.ItemCount - r.AcceptedCount AND mi.mail_id = r.DeliveryMailID "
+        "AND mi.receiver = r.Sender))", CONNECTION_ASYNC);
     // Successful absence has a NULL ReceiptID row; a failed query must never be treated as absence.
     // Last four columns prove physical custody: owner, entry, count, remaining source link (must be NULL).
     PrepareStatement(CHAR_SEL_GUILD_MAIL_RECEIPT_BY_ITEM,
