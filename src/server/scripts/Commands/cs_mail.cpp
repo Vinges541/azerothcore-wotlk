@@ -189,6 +189,13 @@ public:
 
     static bool HandleMailReturnCommand(ChatHandler* handler, PlayerIdentifier target, uint32 mailId)
     {
+        auto mailboxLease = sMailMgr->BeginMailboxLoad(target.GetGUID());
+        if (!mailboxLease)
+        {
+            handler->SendErrorMessage("Mailbox is busy with a pending delivery. Retry the command later.");
+            return true;
+        }
+
         // Query mail data from DB so this works for offline players
         QueryResult result = CharacterDatabase.Query(
             "SELECT messageType, sender, receiver, subject, body, money, mailTemplateId, checked, deliver_time"
@@ -243,9 +250,18 @@ public:
             return true;
         }
 
+        auto senderLease = sMailMgr->BeginMailboxLoad(ObjectGuid::Create<HighGuid::Player>(sender));
+        if (!senderLease)
+        {
+            handler->SendErrorMessage("Sender mailbox is busy with a pending delivery. Retry the command later.");
+            return true;
+        }
+
         Player* player = target.GetConnectedPlayer();
 
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        trans->KeepAlive(mailboxLease);
+        trans->KeepAlive(senderLease);
 
         // Collect attachments before the script-hook check and any deletion, so a hook
         // veto can still abort the command with nothing changed.
