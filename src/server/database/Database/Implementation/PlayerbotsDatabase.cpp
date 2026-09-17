@@ -42,6 +42,9 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
     PrepareStatement(PLAYERBOTS_INS_EQUIP_CACHE, "INSERT INTO playerbots_equip_cache (clazz, lvl, slot, quality, item) VALUES (?, ?, ?, ?, ?)", CONNECTION_ASYNC);
 
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_VALUE, "SELECT `value`, `time`, validIn FROM playerbots_guild_tasks WHERE `value` = ? AND guildid = ? AND `type` = ?", CONNECTION_SYNCH);
+    PrepareStatement(PLAYERBOTS_SEL_GUILD_TASK_ITEM_EXPIRY,
+        "SELECT COALESCE(MAX(CAST(`time` AS UNSIGNED) + validIn), 0) FROM playerbots_guild_tasks "
+        "WHERE `value` = ? AND guildid = ? AND `type` = 'itemTask'", CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER, "SELECT `value`, `time`, validIn, guildid FROM playerbots_guild_tasks WHERE owner = ? AND `type` = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_AND_TYPE, "SELECT `value`, `time`, validIn FROM playerbots_guild_tasks WHERE owner = ? AND guildid = ? AND `type` = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_DISTINCT, "SELECT DISTINCT guildid FROM playerbots_guild_tasks WHERE owner = ?", CONNECTION_SYNCH);
