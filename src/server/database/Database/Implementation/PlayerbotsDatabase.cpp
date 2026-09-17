@@ -157,6 +157,29 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
         "AND CAST(`progress`.`time` AS UNSIGNED) + `progress`.`validIn` > ?",
         CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_AND_TYPE, "SELECT `value`, `time`, validIn FROM playerbots_guild_tasks WHERE owner = ? AND guildid = ? AND `type` = ?", CONNECTION_SYNCH);
+    // One characters DB outbox is paired with this ledger. Receipt IDs must never be reset or reused.
+    // Binds: receipt, mail, item GUID, sender, receiver, guild, entry, count, event, unit price, updatedAt.
+    // Duplicate admission preserves BOTH immutable payload and any already committed outcome.
+    PrepareStatement(PLAYERBOTS_INS_GUILD_MAIL_CONTRIBUTION,
+        "INSERT INTO `playerbots_guild_mail_contribution` "
+        "(`ReceiptID`, `MailID`, `SourceItemGUID`, `Sender`, `Receiver`, `GuildID`, `ItemEntry`, `ItemCount`, "
+        "`EventTime`, `UnitPriceCopper`, `UpdatedAt`) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) "
+        "ON DUPLICATE KEY UPDATE `ReceiptID` = `ReceiptID`", CONNECTION_ASYNC);
+    // NULL ReceiptID is successful absence. Always verify payload/outcome after a duplicate-key write.
+    PrepareStatement(PLAYERBOTS_SEL_GUILD_MAIL_CONTRIBUTION,
+        "SELECT `r`.`ReceiptID`, `r`.`MailID`, `r`.`SourceItemGUID`, `r`.`Sender`, `r`.`Receiver`, `r`.`GuildID`, "
+        "`r`.`ItemEntry`, `r`.`ItemCount`, `r`.`EventTime`, `r`.`UnitPriceCopper`, `r`.`State`, `r`.`TaskID`, "
+        "`r`.`BeforeCount`, `r`.`AcceptedCount`, `r`.`PaymentCopper`, `r`.`UpdatedAt` "
+        "FROM (SELECT 1) AS `seed` LEFT JOIN `playerbots_guild_mail_contribution` AS `r` "
+        "ON `r`.`ReceiptID` = ?", CONNECTION_ASYNC);
+    // Binds: state, exclusive receipt cursor. Terminal rows remain available for idempotent replay.
+    PrepareStatement(PLAYERBOTS_SEL_GUILD_MAIL_CONTRIBUTION_PAGE,
+        "SELECT `r`.`ReceiptID`, `r`.`MailID`, `r`.`SourceItemGUID`, `r`.`Sender`, `r`.`Receiver`, `r`.`GuildID`, "
+        "`r`.`ItemEntry`, `r`.`ItemCount`, `r`.`EventTime`, `r`.`UnitPriceCopper`, `r`.`State`, `r`.`TaskID`, "
+        "`r`.`BeforeCount`, `r`.`AcceptedCount`, `r`.`PaymentCopper`, `r`.`UpdatedAt` "
+        "FROM (SELECT 1) AS `seed` LEFT JOIN "
+        "(SELECT * FROM `playerbots_guild_mail_contribution` WHERE `State` = ? AND `ReceiptID` > ? "
+        "ORDER BY `ReceiptID` LIMIT 64) AS `r` ON 1 = 1 ORDER BY `r`.`ReceiptID`", CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_DISTINCT, "SELECT DISTINCT guildid FROM playerbots_guild_tasks WHERE owner = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_ORDERED, "SELECT `value`, `time`, validIn, guildid FROM playerbots_guild_tasks WHERE owner = ? AND type = ? ORDER BY guildid", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_DEL_GUILD_TASKS, "DELETE FROM playerbots_guild_tasks WHERE owner = ? AND guildid = ? AND `type` = ?", CONNECTION_ASYNC);
