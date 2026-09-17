@@ -20,6 +20,7 @@
 
 #include "DatabaseEnvFwd.h"
 #include "Define.h"
+#include <optional>
 #include <variant>
 
 //- Type specifier of our element data
@@ -34,6 +35,7 @@ struct SQLElementData
 {
     std::variant<PreparedStatementBase*, std::string> element;
     SQLElementDataType type;
+    std::optional<uint64> expectedAffectedRows;
 };
 
 class MySQLConnection;

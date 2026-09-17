@@ -59,7 +59,7 @@ public:
     }
 
 protected:
-    void AppendPreparedStatement(PreparedStatementBase* statement);
+    void AppendPreparedStatement(PreparedStatementBase* statement, std::optional<uint64> expectedAffectedRows = {});
     void Cleanup();
     std::vector<SQLElementData> m_queries;
 
@@ -77,6 +77,13 @@ public:
     void Append(PreparedStatement<T>* statement)
     {
         AppendPreparedStatement(statement);
+    }
+
+    // DML only. A mismatched affected-row count aborts and rolls back the entire transaction.
+    // Use for conditional writes whose no-op must not allow dependent statements/hooks to commit.
+    void AppendWithAffectedRows(PreparedStatement<T>* statement, uint64 expectedAffectedRows)
+    {
+        AppendPreparedStatement(statement, expectedAffectedRows);
     }
 };
 

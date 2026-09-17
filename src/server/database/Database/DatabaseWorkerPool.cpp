@@ -328,7 +328,7 @@ void DatabaseWorkerPool<T>::DirectCommitTransaction(SQLTransaction<T>& transacti
 
         for (uint8 i = 0; i < loopBreaker; ++i)
         {
-            if (!connection->ExecuteTransaction(transaction))
+            if (connection->ExecuteTransaction(transaction) != ER_LOCK_DEADLOCK)
                 break;
         }
     }

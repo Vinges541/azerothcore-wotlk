@@ -39,11 +39,12 @@ void TransactionBase::Append(std::string_view sql)
 }
 
 //- Append a prepared statement to the transaction
-void TransactionBase::AppendPreparedStatement(PreparedStatementBase* stmt)
+void TransactionBase::AppendPreparedStatement(PreparedStatementBase* stmt, std::optional<uint64> expectedAffectedRows)
 {
     SQLElementData data = {};
     data.type = SQL_ELEMENT_PREPARED;
     data.element = stmt;
+    data.expectedAffectedRows = expectedAffectedRows;
     m_queries.emplace_back(data);
 }
 
@@ -112,14 +113,17 @@ bool TransactionTask::Execute()
 
             for (Milliseconds loopDuration{}, startMSTime = GetTimeMS(); loopDuration <= DEADLOCK_MAX_RETRY_TIME_MS; loopDuration = GetMSTimeDiffToNow(startMSTime))
             {
-                if (!TryExecute())
+                errorCode = TryExecute();
+                if (!errorCode)
                     return true;
+                if (errorCode != ER_LOCK_DEADLOCK)
+                    break;
 
                 LOG_WARN("sql.sql", "Deadlocked SQL Transaction, retrying. Loop timer: {} ms, Thread Id: {}", loopDuration.count(), threadId);
             }
         }
 
-        LOG_ERROR("sql.sql", "Fatal deadlocked SQL Transaction, it will not be retried anymore. Thread Id: {}", threadId);
+        LOG_ERROR("sql.sql", "SQL transaction retry stopped with error {}. Thread Id: {}", errorCode, threadId);
     }
 
     // Clean up now.
@@ -159,17 +163,20 @@ bool TransactionWithResultTask::Execute()
 
             for (Milliseconds loopDuration{}, startMSTime = GetTimeMS(); loopDuration <= DEADLOCK_MAX_RETRY_TIME_MS; loopDuration = GetMSTimeDiffToNow(startMSTime))
             {
-                if (!TryExecute())
+                errorCode = TryExecute();
+                if (!errorCode)
                 {
                     m_result.set_value(true);
                     return true;
                 }
+                if (errorCode != ER_LOCK_DEADLOCK)
+                    break;
 
                 LOG_WARN("sql.sql", "Deadlocked SQL Transaction, retrying. Loop timer: {} ms, Thread Id: {}", loopDuration.count(), threadId);
             }
         }
 
-        LOG_ERROR("sql.sql", "Fatal deadlocked SQL Transaction, it will not be retried anymore. Thread Id: {}", threadId);
+        LOG_ERROR("sql.sql", "SQL transaction retry stopped with error {}. Thread Id: {}", errorCode, threadId);
     }
 
     // Clean up now.

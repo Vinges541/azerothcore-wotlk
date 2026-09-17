@@ -414,6 +414,17 @@ int MySQLConnection::ExecuteTransaction(std::shared_ptr<TransactionBase> transac
                     RollbackTransaction();
                     return errorCode;
                 }
+                if (data.expectedAffectedRows)
+                {
+                    auto affected = mysql_stmt_affected_rows(GetPreparedStatement(stmt->GetIndex())->GetSTMT());
+                    if (affected == static_cast<uint64>(-1) || affected != *data.expectedAffectedRows)
+                    {
+                        LOG_WARN("sql.sql", "Transaction aborted: statement {} affected {} rows, expected {}",
+                            stmt->GetIndex(), affected, *data.expectedAffectedRows);
+                        RollbackTransaction();
+                        return -1; // Application precondition failure, not a retryable MySQL deadlock.
+                    }
+                }
             }
             break;
             case SQL_ELEMENT_RAW:
