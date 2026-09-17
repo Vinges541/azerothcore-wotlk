@@ -950,6 +950,9 @@ void Player::FailQuest(uint32 questId)
             if (ItemTemplate const* itemTemplate = sObjectMgr->GetItemTemplate(quest->ItemDrop[i]))
                 if (quest->ItemDropQuantity[i] > 0 && itemTemplate->Bonding == BIND_QUEST_ITEM)
                     DestroyItemCount(quest->ItemDrop[i], quest->ItemDropQuantity[i], true);
+
+        if (qStatus != QUEST_STATUS_FAILED)
+            sScriptMgr->OnPlayerQuestFail(this, quest);
     }
 }
 

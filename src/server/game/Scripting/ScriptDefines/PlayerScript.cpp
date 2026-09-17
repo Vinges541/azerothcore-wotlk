@@ -873,6 +873,11 @@ void ScriptMgr::OnPlayerQuestAccept(Player* player, Quest const* quest)
     CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_PLAYER_QUEST_ACCEPT, script->OnPlayerQuestAccept(player, quest));
 }
 
+void ScriptMgr::OnPlayerQuestFail(Player* player, Quest const* quest)
+{
+    CALL_ENABLED_HOOKS(PlayerScript, PLAYERHOOK_ON_QUEST_FAIL, script->OnPlayerQuestFail(player, quest));
+}
+
 // Player anti cheat
 void ScriptMgr::AnticheatSetCanFlybyServer(Player* player, bool apply)
 {

@@ -478,6 +478,7 @@ public: /* PlayerScript */
     void OnPlayerLeaveCombat(Player* player);
     void OnPlayerQuestAbandon(Player* player, uint32 questId);
     void OnPlayerQuestAccept(Player* player, Quest const* quest);
+    void OnPlayerQuestFail(Player* player, Quest const* quest);
     bool OnPlayerCanSendErrorAlreadyLooted(Player* player);
     void OnPlayerAfterCreatureLoot(Player* player);
     void OnPlayerAfterCreatureLootMoney(Player* player);
