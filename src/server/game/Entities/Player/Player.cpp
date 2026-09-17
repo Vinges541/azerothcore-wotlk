@@ -2972,7 +2972,8 @@ bool Player::ReconcileMailCustody(uint32 mailId, ObjectGuid::LowType itemGuid, u
         return true;
     if (!attached || !item || item->GetGUID() != ObjectGuid(HighGuid::Item, itemGuid) ||
         item->GetOwnerGUID() != GetGUID() || item->GetEntry() != itemEntry || item->GetCount() != itemCount ||
-        item->GetState() != ITEM_UNCHANGED || item->IsInUpdateQueue() || item->IsInTrade() || item->IsInWorld() ||
+        (item->GetState() != ITEM_UNCHANGED && item->GetState() != ITEM_NEW) ||
+        item->IsInUpdateQueue() || item->IsInTrade() || item->IsInWorld() ||
         item->GetContainer() || item->IsRefundable() || item->IsBOPTradable())
         return false;
     // The SQL transaction already removed this link. Do not populate removedItems or mark the mail dirty.
