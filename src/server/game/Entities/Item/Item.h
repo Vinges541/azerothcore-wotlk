@@ -240,6 +240,10 @@ public:
     [[nodiscard]] bool IsBoundByTempEnchant() const;
     virtual void SaveToDB(CharacterDatabaseTransaction trans);
     virtual bool LoadFromDB(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fields, uint32 entry);
+    // Fresh detached non-bag items only. Requires the same 11-column projection as LoadFromDB.
+    // Rejects partial/repair-requiring data and auxiliary item state; never writes SQL or invokes repair hooks.
+    // Caller owns the item on either outcome and must discard it on failure, without SaveToDB.
+    bool LoadFromDBWithoutRepair(ObjectGuid::LowType guid, ObjectGuid ownerGuid, Field* fields, uint32 entry);
     static void DeleteFromDB(CharacterDatabaseTransaction trans, ObjectGuid::LowType itemGuid);
     virtual void DeleteFromDB(CharacterDatabaseTransaction trans);
     static void DeleteFromInventoryDB(CharacterDatabaseTransaction trans, ObjectGuid::LowType itemGuid);
@@ -365,6 +369,7 @@ public:
 
     std::string GetDebugInfo() const override;
 private:
+    bool LoadFromDBImpl(ObjectGuid::LowType guid, ObjectGuid ownerGuid, Field* fields, uint32 entry, bool allowRepair);
     std::string m_text;
     uint8 m_slot;
     Bag* m_container;

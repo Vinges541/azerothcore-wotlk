@@ -419,6 +419,21 @@ void Item::SaveToDB(CharacterDatabaseTransaction trans)
 
 bool Item::LoadFromDB(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fields, uint32 entry)
 {
+    return LoadFromDBImpl(guid, owner_guid, fields, entry, true);
+}
+
+bool Item::LoadFromDBWithoutRepair(ObjectGuid::LowType guid, ObjectGuid ownerGuid, Field* fields, uint32 entry)
+{
+    if (!guid || !entry || !fields || m_uint32Values || IsInWorld() || IsInUpdateQueue() || GetContainer())
+        return false;
+    for (unsigned index = 0; index < 11; ++index)
+        if (fields[index].IsNull())
+            return false;
+    return LoadFromDBImpl(guid, ownerGuid, fields, entry, false);
+}
+
+bool Item::LoadFromDBImpl(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fields, uint32 entry, bool allowRepair)
+{
     //                                                    0                1      2         3        4      5             6                 7           8           9    10
     //result = CharacterDatabase.Query("SELECT creatorGuid, giftCreatorGuid, count, duration, charges, flags, enchantments, randomPropertyId, durability, playedTime, text FROM item_instance WHERE guid = '{}'", guid);
 
@@ -437,6 +452,11 @@ bool Item::LoadFromDB(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fi
         return false;
     }
 
+    if (!allowRepair && (proto->InventoryType == INVTYPE_BAG || proto->Duration || fields[3].Get<uint32>() ||
+        !fields[2].Get<uint32>() ||
+        fields[2].Get<uint32>() > proto->GetMaxStackSize()))
+        return false;
+
     // set owner (not if item is only loaded for gbank/auction/mail
     if (owner_guid)
         SetOwnerGUID(owner_guid);
@@ -451,6 +471,8 @@ bool Item::LoadFromDB(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fi
     // update duration if need, and remove if not need
     if ((proto->Duration == 0) != (duration == 0))
     {
+        if (!allowRepair)
+            return false;
         SetUInt32Value(ITEM_FIELD_DURATION, proto->Duration);
         need_save = true;
     }
@@ -463,11 +485,20 @@ bool Item::LoadFromDB(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fi
             if (Optional<int32> charges = Acore::StringTo<int32>(tokens[i]))
                 SetSpellCharges(i, *charges);
             else
+            {
+                if (!allowRepair)
+                    return false;
                 LOG_ERROR("entities.item", "Invalid charge info '{}' for item {}, charge data not loaded.", tokens.at(i), GetGUID().ToString());
+            }
         }
     }
+    else if (!allowRepair)
+        return false;
 
     SetUInt32Value(ITEM_FIELD_FLAGS, fields[5].Get<uint32>());
+    if (!allowRepair && (IsWrapped() || IsRefundable() || IsBOPTradable() ||
+        (IsSoulBound() && proto->Bonding == NO_BIND)))
+        return false;
     // Remove bind flag for items vs NO_BIND set
     if (IsSoulBound() && proto->Bonding == NO_BIND && sScriptMgr->CanApplySoulboundFlag(this, proto))
     {
@@ -479,6 +510,8 @@ bool Item::LoadFromDB(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fi
 
     if (!_LoadIntoDataField(fields[6].Get<std::string>(), ITEM_FIELD_ENCHANTMENT_1_1, MAX_ENCHANTMENT_SLOT * MAX_ENCHANTMENT_OFFSET))
     {
+        if (!allowRepair)
+            return false;
         LOG_WARN("entities.item", "Invalid enchantment data '{}' for item {}. Forcing partial load.", fields[6].Get<std::string>(), GetGUID().ToString());
     }
 
@@ -495,6 +528,8 @@ bool Item::LoadFromDB(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fi
     SetUInt32Value(ITEM_FIELD_MAXDURABILITY, proto->MaxDurability);
     if (durability > proto->MaxDurability && !IsWrapped())
     {
+        if (!allowRepair)
+            return false;
         SetUInt32Value(ITEM_FIELD_DURABILITY, proto->MaxDurability);
         need_save = true;
     }
@@ -504,6 +539,8 @@ bool Item::LoadFromDB(ObjectGuid::LowType guid, ObjectGuid owner_guid, Field* fi
 
     if (need_save)                                           // normal item changed state set not work at loading
     {
+        if (!allowRepair)
+            return false;
         CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_UPD_ITEM_INSTANCE_ON_LOAD);
         stmt->SetData(0, GetUInt32Value(ITEM_FIELD_DURATION));
         stmt->SetData(1, GetUInt32Value(ITEM_FIELD_FLAGS));
