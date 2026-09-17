@@ -24,6 +24,7 @@
 #include "Mail.h"
 #include "ObjectAccessor.h"
 #include "Timer.h"
+#include <algorithm>
 #include <map>
 #include <limits>
 
@@ -134,24 +135,32 @@ void MailMgr::OnMailReturned(ObjectGuid::LowType oldReceiverLow, ObjectGuid::Low
 
 void MailMgr::LoadMailCounts()
 {
-    QueryResult result = CharacterDatabase.Query("SELECT receiver, COUNT(receiver) FROM mail GROUP BY receiver");
+    PreparedQueryResult result = CharacterDatabase.Query(CharacterDatabase.GetPreparedStatement(CHAR_SEL_MAIL_COUNTS));
     if (!result)
         return;
 
     do
     {
         Field* fields = result->Fetch();
-        sCharacterCache->UpdateCharacterMailCount(ObjectGuid(HighGuid::Player, fields[0].Get<uint32>()), static_cast<int32>(fields[1].Get<uint64>()), true);
+        uint64 count = std::min<uint64>(fields[1].Get<uint64>(), std::numeric_limits<uint16>::max());
+        sCharacterCache->UpdateCharacterMailCount(ObjectGuid(HighGuid::Player, fields[0].Get<uint32>()),
+            static_cast<int32>(count), true);
     } while (result->NextRow());
 }
 
 void MailMgr::RecountMailCount(ObjectGuid::LowType receiverLow)
 {
-    int32 count = 0;
-    if (QueryResult result = CharacterDatabase.Query("SELECT COUNT(*) FROM mail WHERE receiver = {}", receiverLow))
-        count = static_cast<int32>((*result)[0].Get<uint64>());
-
-    sCharacterCache->UpdateCharacterMailCount(ObjectGuid(HighGuid::Player, receiverLow), count, true);
+    auto* stmt = CharacterDatabase.GetPreparedStatement(CHAR_SEL_MAIL_COUNT_BY_RECEIVER);
+    stmt->SetData(0, receiverLow);
+    PreparedQueryResult result = CharacterDatabase.Query(stmt);
+    if (!result || result->GetRowCount() != 1 || result->GetFieldCount() != 1 || result->Fetch()[0].IsNull())
+    {
+        LOG_WARN("server.mail", "Mail count query failed for {}; preserving cached count",
+            ObjectGuid(HighGuid::Player, receiverLow).ToString());
+        return;
+    }
+    uint64 count = std::min<uint64>(result->Fetch()[0].Get<uint64>(), std::numeric_limits<uint16>::max());
+    sCharacterCache->UpdateCharacterMailCount(ObjectGuid(HighGuid::Player, receiverLow), static_cast<int32>(count), true);
 }
 
 void MailMgr::DeleteEmptyExpiredMail(uint32 mailId, ObjectGuid::LowType receiverLow)

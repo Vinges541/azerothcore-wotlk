@@ -96,8 +96,12 @@ void CharacterCache::RefreshCacheEntry(uint32 lowGuid)
     do
     {
         Field* fields = result->Fetch();
+        auto const* cached = GetCharacterCacheByGuid(ObjectGuid::Create<HighGuid::Player>(lowGuid));
+        uint16 previousMailCount = cached ? cached->MailCount : 0;
         DeleteCharacterCacheEntry(ObjectGuid::Create<HighGuid::Player>(lowGuid), fields[1].Get<std::string>());
         AddCharacterCacheEntry(ObjectGuid::Create<HighGuid::Player>(fields[0].Get<uint32>()) /*guid*/, fields[2].Get<uint32>() /*account*/, fields[1].Get<std::string>() /*name*/, fields[4].Get<uint8>() /*gender*/, fields[3].Get<uint8>() /*race*/, fields[5].Get<uint8>() /*class*/, fields[6].Get<uint8>() /*level*/);
+        // Keep the last known count if the subsequent recount fails; replacing the cache entry resets it to zero.
+        UpdateCharacterMailCount(ObjectGuid::Create<HighGuid::Player>(lowGuid), previousMailCount, true);
     } while (result->NextRow());
 
     sMailMgr->RecountMailCount(lowGuid);
