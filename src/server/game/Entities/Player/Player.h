@@ -1687,7 +1687,8 @@ public:
     };
     // World-thread only, from a fresh committed DB snapshot read under this mutation lease.
     // Never synthesize a snapshot from a historical receipt: collected/deleted mail must not be recreated.
-    // Takes item ownership only on Inserted. Does not change SQL, cached mail count or notifications.
+    // Takes item ownership only on Inserted; recomputes unread/timer state and notifies only for new ready unread mail.
+    // Does not change SQL or CharacterCache's total mail count.
     MailCachePublication PublishCommittedMail(Mail const& snapshot, std::unique_ptr<Item>& item,
         ObjectGuid sender, uint64 mutationToken);
 

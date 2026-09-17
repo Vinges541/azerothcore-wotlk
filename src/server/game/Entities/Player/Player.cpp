@@ -57,6 +57,7 @@
 #include "LFGMgr.h"
 #include "Log.h"
 #include "MailMgr.h"
+#include <limits>
 #include "LootItemStorage.h"
 #include "MapMgr.h"
 #include "MiscPackets.h"
@@ -3033,6 +3034,7 @@ Player::MailCachePublication Player::PublishCommittedMail(Mail const& snapshot, 
                 if (cached->GetUInt32Value(index) != item->GetUInt32Value(index))
                     return MailCachePublication::Rejected;
         }
+        UpdateNextMailTimeAndUnreads();
         return MailCachePublication::AlreadyPresent;
     }
     if (item && mMitems.contains(snapshot.items.front().item_guid))
@@ -3054,6 +3056,9 @@ Player::MailCachePublication Player::PublishCommittedMail(Mail const& snapshot, 
     }
     mail.release();
     item.release();
+    UpdateNextMailTimeAndUnreads();
+    if (!(snapshot.checked & MAIL_CHECK_MASK_READ) && snapshot.deliver_time <= GameTime::GetGameTime().count())
+        SendNewMail();
     return MailCachePublication::Inserted;
 }
 
@@ -3098,7 +3103,8 @@ void Player::AddNewMailDeliverTime(time_t deliver_time)
 {
     if (deliver_time <= GameTime::GetGameTime().count())                      // ready now
     {
-        ++unReadMails;
+        if (unReadMails < std::numeric_limits<uint8>::max())
+            ++unReadMails;
         SendNewMail();
     }
     else                                                    // not ready and no have ready mails

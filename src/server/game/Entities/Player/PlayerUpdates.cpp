@@ -40,6 +40,7 @@
 #include "WeatherMgr.h"
 #include "WorldState.h"
 #include "WorldStatePackets.h"
+#include <limits>
 
 /// @todo: this import is not necessary for compilation and marked as unused by the IDE
 //  however, for some reasons removing it would cause a damn linking issue
@@ -448,6 +449,8 @@ void Player::UpdateNextMailTimeAndUnreads()
 
     for (Mail const* mail : GetMails())
     {
+        if (mail->state == MAIL_STATE_DELETED)
+            continue;
         if (mail->deliver_time > cTime)
         {
             if (!m_nextMailDelivereTime || m_nextMailDelivereTime > mail->deliver_time)
@@ -462,7 +465,8 @@ void Player::UpdateNextMailTimeAndUnreads()
         if (cTime < mail->deliver_time || cTime > mail->expire_time)
             continue;
 
-        unReadMails++;
+        if (unReadMails < std::numeric_limits<uint8>::max())
+            ++unReadMails;
     }
 }
 
