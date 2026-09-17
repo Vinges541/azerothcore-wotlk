@@ -44,7 +44,7 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_VALUE, "SELECT `value`, `time`, validIn FROM playerbots_guild_tasks WHERE `value` = ? AND guildid = ? AND `type` = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASK_ITEM_EXPIRY,
         "SELECT COALESCE(MAX(CAST(`time` AS UNSIGNED) + validIn), 0) FROM playerbots_guild_tasks "
-        "WHERE `value` = ? AND guildid = ? AND `type` = 'itemTask'", CONNECTION_ASYNC);
+        "WHERE `value` = ? AND guildid = ? AND `type` = 'itemTask' AND COALESCE(`data`, '') = ''", CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER,
         "SELECT `value`, `time`, validIn, guildid, id, `data` FROM playerbots_guild_tasks "
         "WHERE owner = ? AND `type` = ?", CONNECTION_SYNCH);
@@ -114,6 +114,48 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
         "AND `value` = ? AND `time` <= ? AND CAST(`time` AS UNSIGNED) + `validIn` > ? "
         "AND COALESCE(`data`, '') = '' AND `id` > ? ORDER BY `id` LIMIT 16) AS `task` "
         "ON 1 = 1 ORDER BY `task`.`id`", CONNECTION_ASYNC);
+    // First statement of the contribution transaction: serialize on the exact item task record.
+    PrepareStatement(PLAYERBOTS_LOCK_GUILD_ITEM_TASK,
+        "UPDATE `playerbots_guild_tasks` SET `data` = `data` "
+        "WHERE `id` = ? AND `owner` = ? AND `guildid` = ? AND `type` = 'itemTask'", CONNECTION_ASYNC);
+    PrepareStatement(PLAYERBOTS_UPD_GUILD_ITEM_TASK_COMPLETE,
+        "UPDATE `playerbots_guild_tasks` AS `task` "
+        "JOIN `playerbots_guild_tasks` AS `progress` ON `progress`.`owner` = `task`.`owner` "
+        "AND `progress`.`guildid` = `task`.`guildid` AND `progress`.`type` = 'itemCount' "
+        "JOIN `playerbots_guild_tasks` AS `active` ON `active`.`owner` = `task`.`owner` "
+        "AND `active`.`guildid` = `task`.`guildid` AND `active`.`type` = 'activeTask' "
+        "JOIN `playerbots_guild_tasks` AS `reward` ON `reward`.`owner` = `task`.`owner` "
+        "AND `reward`.`guildid` = `task`.`guildid` AND `reward`.`type` = 'reward' "
+        "LEFT JOIN `playerbots_guild_tasks` AS `thanks` ON `thanks`.`owner` = `task`.`owner` "
+        "AND `thanks`.`guildid` = `task`.`guildid` AND `thanks`.`type` = 'thanks' "
+        "SET `task`.`data` = 'item-complete-v1', `progress`.`value` = 0, `thanks`.`value` = 0, "
+        "`reward`.`value` = 1, `reward`.`time` = GREATEST(`progress`.`time`, ?), `reward`.`validIn` = ? "
+        "WHERE `task`.`id` = ? AND `task`.`owner` = ? AND `task`.`guildid` = ? AND `task`.`value` = ? "
+        "AND `task`.`type` = 'itemTask' AND COALESCE(`task`.`data`, '') = '' AND `active`.`value` = 1 "
+        "AND `progress`.`value` > 0 AND `progress`.`value` <= ? "
+        "AND `task`.`time` <= ? AND CAST(`task`.`time` AS UNSIGNED) + `task`.`validIn` > ? "
+        "AND `active`.`time` <= ? AND CAST(`active`.`time` AS UNSIGNED) + `active`.`validIn` > ? "
+        "AND CAST(`progress`.`time` AS UNSIGNED) + `progress`.`validIn` > ?",
+        CONNECTION_ASYNC);
+    // Run after COMPLETE in the same locked transaction. A completed task cannot also take this branch.
+    PrepareStatement(PLAYERBOTS_UPD_GUILD_ITEM_TASK_PROGRESS,
+        "UPDATE `playerbots_guild_tasks` AS `progress` "
+        "JOIN `playerbots_guild_tasks` AS `task` ON `task`.`owner` = `progress`.`owner` "
+        "AND `task`.`guildid` = `progress`.`guildid` AND `task`.`type` = 'itemTask' "
+        "JOIN `playerbots_guild_tasks` AS `active` ON `active`.`owner` = `task`.`owner` "
+        "AND `active`.`guildid` = `task`.`guildid` AND `active`.`type` = 'activeTask' "
+        "LEFT JOIN `playerbots_guild_tasks` AS `thanks` ON `thanks`.`owner` = `task`.`owner` "
+        "AND `thanks`.`guildid` = `task`.`guildid` AND `thanks`.`type` = 'thanks' "
+        "SET `progress`.`value` = `progress`.`value` - ?, "
+        "`progress`.`time` = GREATEST(`progress`.`time`, ?), `progress`.`validIn` = ?, "
+        "`thanks`.`value` = 1, `thanks`.`time` = GREATEST(`thanks`.`time`, ?), `thanks`.`validIn` = ? "
+        "WHERE `task`.`id` = ? AND `task`.`owner` = ? AND `task`.`guildid` = ? AND `task`.`value` = ? "
+        "AND `progress`.`type` = 'itemCount' AND COALESCE(`task`.`data`, '') = '' AND `active`.`value` = 1 "
+        "AND `progress`.`value` > ? "
+        "AND `task`.`time` <= ? AND CAST(`task`.`time` AS UNSIGNED) + `task`.`validIn` > ? "
+        "AND `active`.`time` <= ? AND CAST(`active`.`time` AS UNSIGNED) + `active`.`validIn` > ? "
+        "AND CAST(`progress`.`time` AS UNSIGNED) + `progress`.`validIn` > ?",
+        CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_AND_TYPE, "SELECT `value`, `time`, validIn FROM playerbots_guild_tasks WHERE owner = ? AND guildid = ? AND `type` = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_DISTINCT, "SELECT DISTINCT guildid FROM playerbots_guild_tasks WHERE owner = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_GUILD_TASKS_BY_OWNER_ORDERED, "SELECT `value`, `time`, validIn, guildid FROM playerbots_guild_tasks WHERE owner = ? AND type = ? ORDER BY guildid", CONNECTION_SYNCH);
