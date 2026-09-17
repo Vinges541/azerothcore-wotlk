@@ -7592,13 +7592,26 @@ void Player::_SaveInventory(CharacterDatabaseTransaction trans)
     m_itemUpdateQueue.clear();
 }
 
+bool Player::BeginMailUpdate()
+{
+    if (!m_mailboxUpdateLease)
+        m_mailboxUpdateLease = sMailMgr->BeginMailboxLoad(GetGUID());
+    if (!m_mailboxUpdateLease)
+        return false;
+    m_mailsUpdated = true;
+    return true;
+}
+
 void Player::_SaveMail(CharacterDatabaseTransaction trans)
 {
     if (!GetMailSize() || !m_mailsUpdated)
     {
+        m_mailboxUpdateLease.reset();
         return;
     }
 
+    trans->KeepAlive(m_mailboxUpdateLease);
+    m_mailboxUpdateLease.reset();
     CharacterDatabasePreparedStatement* stmt = nullptr;
 
     for (PlayerMails::iterator itr = m_mail.begin(); itr != m_mail.end(); ++itr)

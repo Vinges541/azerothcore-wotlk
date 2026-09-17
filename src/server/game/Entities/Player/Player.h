@@ -41,6 +41,7 @@
 #include "TradeData.h"
 #include "Unit.h"
 #include "WorldSession.h"
+#include <memory>
 #include <set>
 #include <string>
 #include <vector>
@@ -1619,6 +1620,8 @@ public:
     static void DeleteOldRecoveryItems(uint32 keepDays);
 
     bool m_mailsUpdated;
+    // Call only when committing a native mail change; retain access until _SaveMail queues that change.
+    bool BeginMailUpdate();
 
     void SetBindPoint(ObjectGuid guid);
     void SendTalentWipeConfirm(ObjectGuid guid);
@@ -2874,6 +2877,7 @@ protected:
     uint32 m_ArenaTeamIdInvited;
 
     PlayerMails m_mail;
+    std::shared_ptr<void> m_mailboxUpdateLease;
     PlayerSpellMap m_spells;
     PlayerTalentMap m_talents;
     uint32 m_lastPotionId;                              // last used health/mana potion in combat, that block next potion use

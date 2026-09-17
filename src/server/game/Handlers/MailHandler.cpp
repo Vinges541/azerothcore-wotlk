@@ -153,6 +153,14 @@ void WorldSession::HandleSendMail(WorldPacket& recvData)
         return;
     }
 
+    auto mailboxLease = sMailMgr->BeginMailboxLoad(player->GetGUID());
+    auto receiverLease = sMailMgr->BeginMailboxLoad(receiverGuid);
+    if (!mailboxLease || !receiverLease)
+    {
+        player->SendMailResult(0, MAIL_SEND, MAIL_ERR_INTERNAL_ERROR);
+        return;
+    }
+
     if (money && COD) // cannot send money in a COD mail
     {
         LOG_ERROR("network.opcode", "{} attempt to dupe money!!!.", receiver);
@@ -321,6 +329,8 @@ void WorldSession::HandleSendMail(WorldPacket& recvData)
     MailDraft draft(subject, body);
 
     CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+    trans->KeepAlive(mailboxLease);
+    trans->KeepAlive(receiverLease);
 
     std::string itemLogStr = "";
     if (items_count > 0 || money > 0)
@@ -391,13 +401,17 @@ void WorldSession::HandleMailMarkAsRead(WorldPacket& recvData)
         return;
 
     Player* player = _player;
+    auto mailboxLease = sMailMgr->BeginMailboxLoad(player->GetGUID());
+    if (!mailboxLease)
+        return;
     Mail* m = player->GetMail(mailId);
     if (m && m->state != MAIL_STATE_DELETED)
     {
+        if (!player->BeginMailUpdate())
+            return;
         if (player->unReadMails)
             --player->unReadMails;
         m->checked = m->checked | MAIL_CHECK_MASK_READ;
-        player->m_mailsUpdated = true;
         m->state = MAIL_STATE_CHANGED;
     }
 }
@@ -414,9 +428,14 @@ void WorldSession::HandleMailDelete(WorldPacket& recvData)
     if (!CanOpenMailBox(mailbox))
         return;
 
-    Mail* m = _player->GetMail(mailId);
     Player* player = _player;
-    player->m_mailsUpdated = true;
+    auto mailboxLease = sMailMgr->BeginMailboxLoad(player->GetGUID());
+    if (!mailboxLease)
+    {
+        player->SendMailResult(mailId, MAIL_DELETED, MAIL_ERR_INTERNAL_ERROR);
+        return;
+    }
+    Mail* m = player->GetMail(mailId);
     if (m && m->state != MAIL_STATE_DELETED)
     {
         // delete shouldn't show up for COD mails
@@ -426,6 +445,11 @@ void WorldSession::HandleMailDelete(WorldPacket& recvData)
             return;
         }
 
+        if (!player->BeginMailUpdate())
+        {
+            player->SendMailResult(mailId, MAIL_DELETED, MAIL_ERR_INTERNAL_ERROR);
+            return;
+        }
         m->state = MAIL_STATE_DELETED;
 
         sMailMgr->OnMailDeleted(player->GetGUID().GetCounter());
@@ -873,6 +897,13 @@ void WorldSession::HandleMailCreateTextItem(WorldPacket& recvData)
 
     Player* player = _player;
 
+    auto mailboxLease = sMailMgr->BeginMailboxLoad(player->GetGUID());
+    if (!mailboxLease)
+    {
+        player->SendMailResult(mailId, MAIL_MADE_PERMANENT, MAIL_ERR_INTERNAL_ERROR);
+        return;
+    }
+
     Mail* m = player->GetMail(mailId);
     if (!m || (m->body.empty() && !m->mailTemplateId) || m->state == MAIL_STATE_DELETED || m->deliver_time > GameTime::GetGameTime().count() || (m->checked & MAIL_CHECK_MASK_COPIED))
     {
@@ -912,9 +943,14 @@ void WorldSession::HandleMailCreateTextItem(WorldPacket& recvData)
     uint8 msg = _player->CanStoreItem(NULL_BAG, NULL_SLOT, dest, bodyItem, false);
     if (msg == EQUIP_ERR_OK)
     {
+        if (!player->BeginMailUpdate())
+        {
+            delete bodyItem;
+            player->SendMailResult(mailId, MAIL_MADE_PERMANENT, MAIL_ERR_INTERNAL_ERROR);
+            return;
+        }
         m->checked = m->checked | MAIL_CHECK_MASK_COPIED;
         m->state = MAIL_STATE_CHANGED;
-        player->m_mailsUpdated = true;
 
         player->StoreItem(dest, bodyItem, true);
         player->SendMailResult(mailId, MAIL_MADE_PERMANENT, MAIL_OK);
