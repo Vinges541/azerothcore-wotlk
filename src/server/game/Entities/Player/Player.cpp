@@ -2943,6 +2943,45 @@ bool Player::IsUnlearnNeededForSpell(uint32 spellId)
     return false;
 }
 
+bool Player::ReconcileMailCustody(uint32 mailId, ObjectGuid::LowType itemGuid, uint32 itemEntry, uint32 itemCount,
+    ObjectGuid sender, uint64 mutationToken)
+{
+    if (!mailId || !itemGuid || !itemEntry || !itemCount ||
+        !sMailMgr->HasMailboxMutation(GetGUID(), sender, mutationToken))
+        return false;
+    if (GetItemByGuid(ObjectGuid(HighGuid::Item, itemGuid)))
+        return false;
+    Mail* source = GetMail(mailId);
+    Item* item = GetMItem(itemGuid);
+    bool attached = false;
+    for (Mail const* mail : m_mail)
+        for (MailItemInfo const& attachment : mail->items)
+            if (attachment.item_guid == itemGuid)
+            {
+                if (mail != source || attached || attachment.item_template != itemEntry)
+                    return false;
+                attached = true;
+            }
+    if (!source)
+        return !item && !attached;
+    if (source->state != MAIL_STATE_UNCHANGED || source->messageType != MAIL_NORMAL ||
+        source->receiver != GetGUID().GetCounter() || source->sender != sender.GetCounter() ||
+        source->money || source->COD || !source->removedItems.empty())
+        return false;
+    if (!attached && !item)
+        return true;
+    if (!attached || !item || item->GetGUID() != ObjectGuid(HighGuid::Item, itemGuid) ||
+        item->GetOwnerGUID() != GetGUID() || item->GetEntry() != itemEntry || item->GetCount() != itemCount ||
+        item->GetState() != ITEM_UNCHANGED || item->IsInUpdateQueue() || item->IsInTrade() || item->IsInWorld() ||
+        item->GetContainer() || item->IsRefundable() || item->IsBOPTradable())
+        return false;
+    // The SQL transaction already removed this link. Do not populate removedItems or mark the mail dirty.
+    source->RemoveItem(itemGuid);
+    RemoveMItem(itemGuid);
+    delete item;
+    return true;
+}
+
 void Player::RemoveMail(uint32 id)
 {
     for (PlayerMails::iterator itr = m_mail.begin(); itr != m_mail.end(); ++itr)

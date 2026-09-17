@@ -49,6 +49,7 @@ public:
     // No timeout: an uncertain commit must retain the token through recovery and native reconciliation.
     uint64 BeginMailboxMutation(ObjectGuid first, ObjectGuid second);
     bool EndMailboxMutation(ObjectGuid first, ObjectGuid second, uint64 token);
+    bool HasMailboxMutation(ObjectGuid first, ObjectGuid second, uint64 token) const;
 
     /**
      * @brief Reports a mail row inserted for a character.

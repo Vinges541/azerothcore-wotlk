@@ -1676,6 +1676,11 @@ public:
 
     void RemoveMail(uint32 id);
 
+    // World-thread only, AFTER durable custody readback. Caller retains the two-character mutation lease.
+    // Removes only stale RAM attachment state; never writes SQL or deletes the mail header.
+    bool ReconcileMailCustody(uint32 mailId, ObjectGuid::LowType itemGuid, uint32 itemEntry, uint32 itemCount,
+        ObjectGuid sender, uint64 mutationToken);
+
     void AddMail(Mail* mail) { m_mail.push_front(mail); }// for call from WorldSession::SendMailTo
     uint32 GetMailSize() { return m_mail.size();}
     Mail* GetMail(uint32 id);

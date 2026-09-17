@@ -90,6 +90,17 @@ uint64 MailMgr::BeginMailboxMutation(ObjectGuid first, ObjectGuid second)
     return token;
 }
 
+bool MailMgr::HasMailboxMutation(ObjectGuid first, ObjectGuid second, uint64 token) const
+{
+    if (!token || first == second)
+        return false;
+    auto& state = *mailboxAccess;
+    std::lock_guard<std::mutex> guard(state.mutex);
+    auto a = state.mutations.find(first);
+    auto b = state.mutations.find(second);
+    return a != state.mutations.end() && b != state.mutations.end() && a->second == token && b->second == token;
+}
+
 bool MailMgr::EndMailboxMutation(ObjectGuid first, ObjectGuid second, uint64 token)
 {
     if (!token || first == second)
