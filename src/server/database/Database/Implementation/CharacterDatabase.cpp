@@ -295,6 +295,22 @@ void CharacterDatabaseConnection::DoPrepareStatements()
         "AND NOT EXISTS (SELECT 1 FROM character_gifts cg WHERE cg.item_guid = i.guid) "
         "AND NOT EXISTS (SELECT 1 FROM item_refund_instance ir WHERE ir.item_guid = i.guid) "
         "AND NOT EXISTS (SELECT 1 FROM item_soulbound_trade_data st WHERE st.itemGuid = i.guid)", CONNECTION_ASYNC);
+    // Bind: receipt ID. Keep the receipt even when its historical delivery mail has already been deleted.
+    // Two rows are enough to detect unsupported multiple attachments without an unbounded result.
+    PrepareStatement(CHAR_SEL_GUILD_MAIL_DELIVERY_SNAPSHOT,
+        "SELECT r.ReceiptID, r.DeliveryMailID, r.Sender, r.Receiver, r.State, "
+        "m.id, m.messageType, m.sender, m.receiver, m.subject, m.body, m.expire_time, m.deliver_time, "
+        "m.money, m.cod, m.checked, m.stationery, m.mailTemplateId, m.has_items, mi.item_guid, mi.receiver, "
+        "i.creatorGuid, i.giftCreatorGuid, i.count, i.duration, i.charges, i.flags, i.enchantments, "
+        "i.randomPropertyId, i.durability, i.playedTime, i.text, i.guid, i.itemEntry, i.owner_guid "
+        "FROM (SELECT 1) seed LEFT JOIN playerbots_guild_mail_receipt r ON r.ReceiptID = ? "
+        "LEFT JOIN mail m ON m.id = r.DeliveryMailID LEFT JOIN mail_items mi ON mi.mail_id = m.id "
+        "LEFT JOIN item_instance i ON i.guid = mi.item_guid "
+        "AND NOT EXISTS (SELECT 1 FROM character_inventory ci WHERE ci.item = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM character_gifts cg WHERE cg.item_guid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM item_refund_instance ir WHERE ir.item_guid = i.guid) "
+        "AND NOT EXISTS (SELECT 1 FROM item_soulbound_trade_data st WHERE st.itemGuid = i.guid) "
+        "LIMIT 2", CONNECTION_ASYNC);
     // Binds: state, exclusive receipt cursor. Page each recoverable state separately using its index.
     PrepareStatement(CHAR_SEL_GUILD_MAIL_RECEIPT_PAGE,
         "SELECT r.ReceiptID, r.MailID, r.SourceItemGUID, r.HeldItemGUID, r.Sender, r.Receiver, r.GuildID, "
