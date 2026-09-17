@@ -295,9 +295,12 @@ class LoginQueryHolder : public CharacterDatabaseQueryHolder
     private:
         uint32 m_accountId;
         ObjectGuid m_guid;
+        std::shared_ptr<void> m_mailboxLoad;
 
     public:
         LoginQueryHolder(uint32 accountId, ObjectGuid guid);
+        LoginQueryHolder(LoginQueryHolder const&) = delete;
+        LoginQueryHolder& operator=(LoginQueryHolder const&) = delete;
 
         ObjectGuid GetGuid() const { return m_guid; }
         uint32 GetAccountId() const { return m_accountId; }

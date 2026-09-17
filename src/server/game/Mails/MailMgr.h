@@ -20,6 +20,9 @@
 
 #include "Define.h"
 #include "ObjectGuid.h"
+#include <map>
+#include <memory>
+#include <mutex>
 
 /**
  * @brief Owns the mail lifecycle bookkeeping that lives outside a single player
@@ -33,6 +36,15 @@ class AC_GAME_API MailMgr
 {
 public:
     static MailMgr* instance();
+
+    // Login holders retain a read lease through SQL execution AND native Player construction.
+    // Calls never wait for SQL. A conflicting operation must retry later.
+    std::shared_ptr<void> BeginMailboxLoad(ObjectGuid character);
+
+    // Acquire both participants atomically before asynchronous custody work. Zero means busy/invalid.
+    // No timeout: an uncertain commit must retain the token through recovery and native reconciliation.
+    uint64 BeginMailboxMutation(ObjectGuid first, ObjectGuid second);
+    bool EndMailboxMutation(ObjectGuid first, ObjectGuid second, uint64 token);
 
     /**
      * @brief Reports a mail row inserted for a character.
@@ -80,6 +92,17 @@ public:
      * @param serverUp When true, receivers that are currently online are skipped.
      */
     void ReturnOrDeleteOldMails(bool serverUp);
+
+private:
+    struct MailboxAccess
+    {
+        std::mutex mutex;
+        std::map<ObjectGuid, uint32> loads;
+        std::map<ObjectGuid, uint64> mutations;
+        uint64 serial = 0;
+    };
+    // Query holders can outlive singleton destruction during shutdown; leases own this state, not MailMgr.
+    std::shared_ptr<MailboxAccess> mailboxAccess = std::make_shared<MailboxAccess>();
 };
 
 #define sMailMgr MailMgr::instance()

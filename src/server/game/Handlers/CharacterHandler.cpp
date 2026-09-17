@@ -35,6 +35,7 @@
 #include "InstanceSaveMgr.h"
 #include "Language.h"
 #include "Log.h"
+#include "MailMgr.h"
 #include "MapMgr.h"
 #include "Metric.h"
 #include "MotdMgr.h"
@@ -69,6 +70,11 @@ LoginQueryHolder::LoginQueryHolder(uint32 accountId, ObjectGuid guid) : m_accoun
 
 bool LoginQueryHolder::Initialize()
 {
+    if (m_mailboxLoad)
+        return false;
+    m_mailboxLoad = sMailMgr->BeginMailboxLoad(m_guid);
+    if (!m_mailboxLoad)
+        return false;
     SetSize(MAX_PLAYER_LOGIN_QUERY);
 
     bool res = true;
@@ -790,7 +796,10 @@ void WorldSession::HandlePlayerLoginOpcode(WorldPacket& recvData)
 
     std::shared_ptr<LoginQueryHolder> holder = std::make_shared<LoginQueryHolder>(GetAccountId(), playerGuid);
     if (!holder->Initialize())
+    {
+        SendCharLoginFailed(LoginFailureReason::Failed);
         return;
+    }
 
     m_playerLoading = true;
     AddQueryHolderCallback(CharacterDatabase.DelayQueryHolder(holder)).AfterComplete([this](SQLQueryHolderBase const& holder)

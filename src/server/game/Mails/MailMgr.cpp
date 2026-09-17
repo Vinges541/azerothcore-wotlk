@@ -25,11 +25,67 @@
 #include "ObjectAccessor.h"
 #include "Timer.h"
 #include <map>
+#include <limits>
 
 MailMgr* MailMgr::instance()
 {
     static MailMgr instance;
     return &instance;
+}
+
+std::shared_ptr<void> MailMgr::BeginMailboxLoad(ObjectGuid character)
+{
+    if (!character.IsPlayer())
+        return {};
+    auto state = mailboxAccess;
+    {
+        std::lock_guard<std::mutex> guard(state->mutex);
+        if (state->mutations.contains(character))
+            return {};
+        auto& readers = state->loads[character];
+        if (readers == std::numeric_limits<uint32>::max())
+            return {};
+        ++readers;
+    }
+    return std::shared_ptr<void>(state.get(), [state, character](void*)
+    {
+        std::lock_guard<std::mutex> lock(state->mutex);
+        auto it = state->loads.find(character);
+        if (it != state->loads.end() && !--it->second)
+            state->loads.erase(it);
+    });
+}
+
+uint64 MailMgr::BeginMailboxMutation(ObjectGuid first, ObjectGuid second)
+{
+    if (!first.IsPlayer() || !second.IsPlayer() || first == second)
+        return 0;
+    auto& state = *mailboxAccess;
+    std::lock_guard<std::mutex> guard(state.mutex);
+    // At most 512 simultaneous two-character operations; live tokens are never evicted.
+    if (state.mutations.size() >= 1024 || state.serial == std::numeric_limits<uint64>::max() ||
+        state.loads.contains(first) || state.loads.contains(second) ||
+        state.mutations.contains(first) || state.mutations.contains(second))
+        return 0;
+    uint64 token = ++state.serial;
+    state.mutations.emplace(first, token);
+    state.mutations.emplace(second, token);
+    return token;
+}
+
+bool MailMgr::EndMailboxMutation(ObjectGuid first, ObjectGuid second, uint64 token)
+{
+    if (!token || first == second)
+        return false;
+    auto& state = *mailboxAccess;
+    std::lock_guard<std::mutex> guard(state.mutex);
+    auto a = state.mutations.find(first);
+    auto b = state.mutations.find(second);
+    if (a == state.mutations.end() || b == state.mutations.end() || a->second != token || b->second != token)
+        return false;
+    state.mutations.erase(a);
+    state.mutations.erase(b);
+    return true;
 }
 
 void MailMgr::OnMailSent(ObjectGuid::LowType receiverLow)
