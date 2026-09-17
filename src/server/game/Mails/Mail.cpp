@@ -30,6 +30,7 @@
 #include "Player.h"
 #include "ScriptMgr.h"
 #include "World.h"
+#include <algorithm>
 
 MailSender::MailSender(Object* sender, MailStationery stationery) : m_stationery(stationery)
 {
@@ -94,6 +95,7 @@ MailReceiver::MailReceiver(Player* receiver, ObjectGuid::LowType receiver_lowgui
 
 MailDraft& MailDraft::AddItem(Item* item)
 {
+    TrackHookItem(item);
     m_items[item->GetGUID()] = item;
     return *this;
 }
@@ -184,9 +186,27 @@ void MailDraft::SendReturnToSender(uint32 /*sender_acc*/, ObjectGuid::LowType se
     SendMailTo(trans, MailReceiver(receiver, receiver_guid), MailSender(MAIL_NORMAL, sender_guid), MAIL_CHECK_MASK_RETURNED, 0);
 }
 
-void MailDraft::ApplySendHooks(MailReceiver const& receiver, MailSender const& sender, MailCheckMask& checked,
-    uint32& deliverDelay, uint32& customExpiration, bool& deleteMailItemsFromDB, bool& sendMail)
+void MailDraft::TrackHookItem(Item* item)
 {
+    if (m_hookItems && std::find(m_hookItems->begin(), m_hookItems->end(), item) == m_hookItems->end())
+        m_hookItems->push_back(item);
+}
+
+void MailDraft::ApplySendHooks(MailReceiver const& receiver, MailSender const& sender, MailCheckMask& checked,
+    uint32& deliverDelay, uint32& customExpiration, bool& deleteMailItemsFromDB, bool& sendMail,
+    std::vector<Item*>* observedItems)
+{
+    struct RestoreObserver
+    {
+        std::vector<Item*>*& current;
+        std::vector<Item*>* previous;
+        ~RestoreObserver() { current = previous; }
+    } restore{m_hookItems, m_hookItems};
+    ASSERT(!observedItems || !m_hookItems || observedItems == m_hookItems);
+    if (observedItems)
+        m_hookItems = observedItems;
+    for (auto const& [guid, item] : m_items)
+        TrackHookItem(item);
     sScriptMgr->OnBeforeMailDraftSendMailTo(this, receiver, sender, checked, deliverDelay, customExpiration,
         deleteMailItemsFromDB, sendMail);
 }

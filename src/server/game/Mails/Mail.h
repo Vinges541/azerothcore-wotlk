@@ -22,6 +22,7 @@
 #include "DatabaseEnvFwd.h"
 #include "ObjectGuid.h"
 #include <map>
+#include <vector>
 
 struct AuctionEntry;
 struct CalendarEvent;
@@ -143,12 +144,17 @@ public:                                                 // finishers
     // Invokes scripts only. Does not apply deletion flags, generate items, send mail or append SQL.
     // Scripts themselves may mutate the draft. A deferred sender must validate the result before executing it.
     // SendMailTo invokes this internally; do not call both for the same delivery attempt.
+    // observedItems optionally collects unique borrowed pointers, including overwritten attachments, for scoped cleanup.
+    // Hooks must transfer owned detached items through AddItem, never delete/retain them or send this draft recursively.
     void ApplySendHooks(MailReceiver const& receiver, MailSender const& sender, MailCheckMask& checked,
-        uint32& deliverDelay, uint32& customExpiration, bool& deleteMailItemsFromDB, bool& sendMail);
+        uint32& deliverDelay, uint32& customExpiration, bool& deleteMailItemsFromDB, bool& sendMail,
+        std::vector<Item*>* observedItems = nullptr);
     void SendReturnToSender(uint32 sender_acc, ObjectGuid::LowType sender_guid, ObjectGuid::LowType receiver_guid, CharacterDatabaseTransaction trans);
     void SendMailTo(CharacterDatabaseTransaction trans, MailReceiver const& receiver, MailSender const& sender, MailCheckMask checked = MAIL_CHECK_MASK_NONE, uint32 deliver_delay = 0, uint32 custom_expiration = 0, bool deleteMailItemsFromDB = false, bool sendMail = true);
 
 private:
+    void TrackHookItem(Item* item);
+    std::vector<Item*>* m_hookItems = nullptr; // Borrowed only during ApplySendHooks; restored on exceptions as well.
     void deleteIncludedItems(CharacterDatabaseTransaction trans, bool inDB = false);
     void prepareItems(Player* receiver, CharacterDatabaseTransaction trans);                // called from SendMailTo for generate mailTemplateBase items
 
