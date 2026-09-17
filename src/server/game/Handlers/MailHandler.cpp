@@ -445,11 +445,28 @@ void WorldSession::HandleMailReturnToSender(WorldPacket& recvData)
         return;
 
     Player* player = _player;
+    auto mailboxLease = sMailMgr->BeginMailboxLoad(player->GetGUID());
+    if (!mailboxLease)
+    {
+        player->SendMailResult(mailId, MAIL_RETURNED_TO_SENDER, MAIL_ERR_INTERNAL_ERROR);
+        return;
+    }
     Mail* m = player->GetMail(mailId);
     if (!m || m->state == MAIL_STATE_DELETED || m->deliver_time > GameTime::GetGameTime().count())
     {
         player->SendMailResult(mailId, MAIL_RETURNED_TO_SENDER, MAIL_ERR_INTERNAL_ERROR);
         return;
+    }
+
+    std::shared_ptr<void> senderLease;
+    if (m->messageType == MAIL_NORMAL && m->sender)
+    {
+        senderLease = sMailMgr->BeginMailboxLoad(ObjectGuid::Create<HighGuid::Player>(m->sender));
+        if (!senderLease)
+        {
+            player->SendMailResult(mailId, MAIL_RETURNED_TO_SENDER, MAIL_ERR_INTERNAL_ERROR);
+            return;
+        }
     }
 
     if (m->HasItems())
@@ -473,6 +490,8 @@ void WorldSession::HandleMailReturnToSender(WorldPacket& recvData)
     //we can return mail now
     //so firstly delete the old one
     CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+    trans->KeepAlive(mailboxLease);
+    trans->KeepAlive(senderLease);
 
     CharacterDatabasePreparedStatement* stmt = CharacterDatabase.GetPreparedStatement(CHAR_DEL_MAIL_BY_ID);
     stmt->SetData(0, mailId);
@@ -528,11 +547,29 @@ void WorldSession::HandleMailTakeItem(WorldPacket& recvData)
 
     Player* player = _player;
 
+    auto mailboxLease = sMailMgr->BeginMailboxLoad(player->GetGUID());
+    if (!mailboxLease)
+    {
+        player->SendMailResult(mailId, MAIL_ITEM_TAKEN, MAIL_ERR_INTERNAL_ERROR);
+        return;
+    }
+
     Mail* m = player->GetMail(mailId);
     if (!m || m->state == MAIL_STATE_DELETED || m->deliver_time > GameTime::GetGameTime().count())
     {
         player->SendMailResult(mailId, MAIL_ITEM_TAKEN, MAIL_ERR_INTERNAL_ERROR);
         return;
+    }
+
+    std::shared_ptr<void> senderLease;
+    if (m->COD && m->sender)
+    {
+        senderLease = sMailMgr->BeginMailboxLoad(ObjectGuid::Create<HighGuid::Player>(m->sender));
+        if (!senderLease)
+        {
+            player->SendMailResult(mailId, MAIL_ITEM_TAKEN, MAIL_ERR_INTERNAL_ERROR);
+            return;
+        }
     }
 
     // verify that the mail has the item to avoid cheaters taking COD items without paying
@@ -563,6 +600,8 @@ void WorldSession::HandleMailTakeItem(WorldPacket& recvData)
     if (msg == EQUIP_ERR_OK)
     {
         CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+        trans->KeepAlive(mailboxLease);
+        trans->KeepAlive(senderLease);
         m->RemoveItem(itemLowGuid);
         m->removedItems.push_back(itemLowGuid);
 
@@ -645,6 +684,13 @@ void WorldSession::HandleMailTakeMoney(WorldPacket& recvData)
 
     Player* player = _player;
 
+    auto mailboxLease = sMailMgr->BeginMailboxLoad(player->GetGUID());
+    if (!mailboxLease)
+    {
+        player->SendMailResult(mailId, MAIL_MONEY_TAKEN, MAIL_ERR_INTERNAL_ERROR);
+        return;
+    }
+
     Mail* m = player->GetMail(mailId);
     if (!m || m->state == MAIL_STATE_DELETED || m->deliver_time > GameTime::GetGameTime().count())
     {
@@ -672,6 +718,7 @@ void WorldSession::HandleMailTakeMoney(WorldPacket& recvData)
 
     // save money and mail to prevent cheating
     CharacterDatabaseTransaction trans = CharacterDatabase.BeginTransaction();
+    trans->KeepAlive(mailboxLease);
     player->SaveGoldToDB(trans);
     player->_SaveMail(trans);
     CharacterDatabase.CommitTransaction(trans);

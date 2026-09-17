@@ -23,6 +23,7 @@
 #include "SQLOperation.h"
 #include "StringFormat.h"
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -49,6 +50,14 @@ public:
 
     [[nodiscard]] std::size_t GetSize() const { return m_queries.size(); }
 
+    // Retain non-gameplay resources through asynchronous execution/retries and transaction destruction.
+    // Attach before dispatch. This is NOT a commit-success callback; do not retain Player/Item pointers here.
+    void KeepAlive(std::shared_ptr<void> resource)
+    {
+        if (resource)
+            m_resources.emplace_back(std::move(resource));
+    }
+
 protected:
     void AppendPreparedStatement(PreparedStatementBase* statement);
     void Cleanup();
@@ -56,6 +65,7 @@ protected:
 
 private:
     bool _cleanedUp{false};
+    std::vector<std::shared_ptr<void>> m_resources;
 };
 
 template<typename T>
