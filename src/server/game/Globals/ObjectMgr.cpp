@@ -27,6 +27,7 @@
 #include "DBCStructure.h"
 #include "DatabaseEnv.h"
 #include "DisableMgr.h"
+#include "Errors.h"
 #include "GameEventMgr.h"
 #include "GameObjectAIFactory.h"
 #include "GameTime.h"
@@ -7593,9 +7594,17 @@ void ObjectMgr::SetHighestGuids()
     if (result)
         _auctionId = (*result)[0].Get<uint32>() + 1;
 
-    result = CharacterDatabase.Query("SELECT MAX(id) FROM mail");
-    if (result)
-        _mailId = (*result)[0].Get<uint32>() + 1;
+    // Receipts retain delivery IDs after native mail deletion. Never reuse those IDs after restart.
+    PreparedQueryResult mailIds = CharacterDatabase.Query(
+        CharacterDatabase.GetPreparedStatement(CHAR_SEL_MAIL_ID_HIGH_WATER));
+    if (!mailIds)
+        ABORT("Cannot restore mail ID high-water mark; refusing to reuse delivery IDs.");
+
+    uint64 const highestMailId = (*mailIds)[0].Get<uint64>();
+    if (highestMailId >= 0xFFFFFFFD)
+        ABORT("Mail IDs exhausted while restoring high-water mark: {}", highestMailId);
+
+    _mailId = static_cast<uint32>(highestMailId + 1);
 
     result = CharacterDatabase.Query("SELECT MAX(arenateamid) FROM arena_team");
     if (result)
