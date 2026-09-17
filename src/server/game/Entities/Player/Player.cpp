@@ -2983,6 +2983,80 @@ bool Player::ReconcileMailCustody(uint32 mailId, ObjectGuid::LowType itemGuid, u
     return true;
 }
 
+Player::MailCachePublication Player::PublishCommittedMail(Mail const& snapshot, std::unique_ptr<Item>& item,
+    ObjectGuid sender, uint64 mutationToken)
+{
+    if (!sMailMgr->HasMailboxMutation(GetGUID(), sender, mutationToken) || !snapshot.messageID ||
+        snapshot.state != MAIL_STATE_UNCHANGED || snapshot.messageType != MAIL_NORMAL ||
+        snapshot.receiver != GetGUID().GetCounter() || snapshot.sender != sender.GetCounter() || snapshot.COD ||
+        snapshot.mailTemplateId || snapshot.money > MAX_MONEY_AMOUNT || !snapshot.removedItems.empty() ||
+        GameTime::GetGameTime().count() > snapshot.expire_time ||
+        snapshot.items.size() > 1 || bool(item) != !snapshot.items.empty())
+        return MailCachePublication::Rejected;
+    if (item)
+    {
+        MailItemInfo const& attachment = snapshot.items.front();
+        if (!attachment.item_guid || item->GetGUID() != ObjectGuid(HighGuid::Item, attachment.item_guid) ||
+            item->GetEntry() != attachment.item_template || item->GetOwnerGUID() != GetGUID() || !item->GetCount() ||
+            item->GetValuesCount() != ITEM_END || item->IsInWorld() || item->IsInUpdateQueue() || item->IsInTrade() ||
+            item->GetContainer() || GetItemByGuid(item->GetGUID()) ||
+            (item->GetState() != ITEM_NEW && item->GetState() != ITEM_UNCHANGED))
+            return MailCachePublication::Rejected;
+        for (Mail const* mail : m_mail)
+            for (MailItemInfo const& existing : mail->items)
+                if (existing.item_guid == attachment.item_guid && mail->messageID != snapshot.messageID)
+                    return MailCachePublication::Rejected;
+    }
+    if (Mail* existing = GetMail(snapshot.messageID))
+    {
+        if (existing->state != MAIL_STATE_UNCHANGED || !existing->removedItems.empty() ||
+            existing->messageType != snapshot.messageType || existing->stationery != snapshot.stationery ||
+            existing->mailTemplateId != snapshot.mailTemplateId || existing->sender != snapshot.sender ||
+            existing->receiver != snapshot.receiver || existing->subject != snapshot.subject ||
+            existing->body != snapshot.body || existing->expire_time != snapshot.expire_time ||
+            existing->deliver_time != snapshot.deliver_time || existing->money != snapshot.money ||
+            existing->COD != snapshot.COD || existing->checked != snapshot.checked ||
+            existing->items.size() != snapshot.items.size())
+            return MailCachePublication::Rejected;
+        if (item)
+        {
+            auto const& attachment = snapshot.items.front();
+            Item* cached = GetMItem(attachment.item_guid);
+            if (existing->items.front().item_guid != attachment.item_guid ||
+                existing->items.front().item_template != attachment.item_template || !cached ||
+                cached == item.get() || cached->GetValuesCount() != item->GetValuesCount() ||
+                cached->IsInWorld() || cached->IsInUpdateQueue() || cached->IsInTrade() || cached->GetContainer() ||
+                (cached->GetState() != ITEM_NEW && cached->GetState() != ITEM_UNCHANGED) ||
+                cached->GetText() != item->GetText())
+                return MailCachePublication::Rejected;
+            for (uint16 index = 0; index < item->GetValuesCount(); ++index)
+                if (cached->GetUInt32Value(index) != item->GetUInt32Value(index))
+                    return MailCachePublication::Rejected;
+        }
+        return MailCachePublication::AlreadyPresent;
+    }
+    if (item && mMitems.contains(snapshot.items.front().item_guid))
+        return MailCachePublication::Rejected;
+    auto mail = std::make_unique<Mail>(snapshot);
+    m_mail.push_front(mail.get());
+    try
+    {
+        if (item && !mMitems.emplace(snapshot.items.front().item_guid, item.get()).second)
+        {
+            m_mail.pop_front();
+            return MailCachePublication::Rejected;
+        }
+    }
+    catch (...)
+    {
+        m_mail.pop_front();
+        throw;
+    }
+    mail.release();
+    item.release();
+    return MailCachePublication::Inserted;
+}
+
 void Player::RemoveMail(uint32 id)
 {
     for (PlayerMails::iterator itr = m_mail.begin(); itr != m_mail.end(); ++itr)

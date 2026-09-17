@@ -1681,6 +1681,16 @@ public:
     bool ReconcileMailCustody(uint32 mailId, ObjectGuid::LowType itemGuid, uint32 itemEntry, uint32 itemCount,
         ObjectGuid sender, uint64 mutationToken);
 
+    enum class MailCachePublication
+    {
+        Rejected, AlreadyPresent, Inserted
+    };
+    // World-thread only, from a fresh committed DB snapshot read under this mutation lease.
+    // Never synthesize a snapshot from a historical receipt: collected/deleted mail must not be recreated.
+    // Takes item ownership only on Inserted. Does not change SQL, cached mail count or notifications.
+    MailCachePublication PublishCommittedMail(Mail const& snapshot, std::unique_ptr<Item>& item,
+        ObjectGuid sender, uint64 mutationToken);
+
     void AddMail(Mail* mail) { m_mail.push_front(mail); }// for call from WorldSession::SendMailTo
     uint32 GetMailSize() { return m_mail.size();}
     Mail* GetMail(uint32 id);
