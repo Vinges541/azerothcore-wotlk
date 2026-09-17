@@ -128,6 +128,15 @@ enum Poi_Icon
     ICON_POI_REDHORSE           =   40                      // Red Horse
 };
 
+// Server-only information about an explicitly scripted learning option, not an execution capability.
+// A confirmation option only opens another menu. The script remains responsible for validation/payment.
+struct GossipSpellLearning
+{
+    uint32 Spell = 0;
+    uint32 Cost = 0;
+    bool Confirmation = false;
+};
+
 struct GossipMenuItem
 {
     uint8       MenuItemIcon;
@@ -137,6 +146,7 @@ struct GossipMenuItem
     uint32      OptionType;
     std::string BoxMessage;
     uint32      BoxMoney;
+    GossipSpellLearning SpellLearning;
 };
 
 // need an ordered container
@@ -167,6 +177,7 @@ public:
 
     void AddMenuItem(int32 menuItemId, uint8 icon, std::string const& message, uint32 sender, uint32 action, std::string const& boxMessage, uint32 boxMoney, bool coded = false);
     void AddMenuItem(uint32 menuId, uint32 menuItemId, uint32 sender, uint32 action, uint32 boxMoney);
+    void SetSpellLearning(uint32 sender, uint32 action, GossipSpellLearning const& learning);
 
     void SetMenuId(uint32 menu_id) { _menuId = menu_id; }
     [[nodiscard]] uint32 GetMenuId() const { return _menuId; }

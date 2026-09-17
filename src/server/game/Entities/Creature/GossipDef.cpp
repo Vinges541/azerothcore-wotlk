@@ -67,6 +67,22 @@ void GossipMenu::AddMenuItem(int32 menuItemId, uint8 icon, std::string const& me
     menuItem.OptionType      = action;
     menuItem.BoxMessage      = boxMessage;
     menuItem.BoxMoney        = boxMoney;
+    menuItem.SpellLearning   = {};
+}
+
+void GossipMenu::SetSpellLearning(uint32 sender, uint32 action, GossipSpellLearning const& learning)
+{
+    GossipMenuItem* match = nullptr;
+    uint32 matches = 0;
+    for (auto& [id, item] : _menuItems)
+        if (item.Sender == sender && item.OptionType == action)
+        {
+            item.SpellLearning = {};
+            match = &item;
+            ++matches;
+        }
+    if (matches == 1 && !match->IsCoded && learning.Spell)
+        match->SpellLearning = learning;
 }
 
 /**
