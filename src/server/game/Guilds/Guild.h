@@ -785,6 +785,9 @@ public:
 
     // Bank tabs
     void SetBankTabText(uint8 tabId, std::string_view text);
+    bool HasBankTab(uint8 tabId) const { return tabId < m_bankTabs.size(); }
+    // Read-only stock snapshot; does not expose bank items or grant withdrawal rights.
+    uint64 GetBankItemCount(uint8 tabId, uint32 entry) const;
 
     void ResetTimes();
 

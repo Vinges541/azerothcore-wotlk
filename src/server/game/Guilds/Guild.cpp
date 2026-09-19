@@ -2657,6 +2657,16 @@ inline void Guild::_UpdateMemberWithdrawSlots(CharacterDatabaseTransaction trans
     }
 }
 
+uint64 Guild::GetBankItemCount(uint8 tabId, uint32 entry) const
+{
+    uint64 count = 0;
+    if (BankTab const* tab = GetBankTab(tabId))
+        for (uint8 slot = 0; slot < GUILD_BANK_MAX_SLOTS; ++slot)
+            if (Item const* item = tab->GetItem(slot); item && item->GetEntry() == entry)
+                count += item->GetCount();
+    return count;
+}
+
 bool Guild::MemberHasTabRights(ObjectGuid guid, uint8 tabId, uint32 rights) const
 {
     if (Member const* member = GetMember(guid))
