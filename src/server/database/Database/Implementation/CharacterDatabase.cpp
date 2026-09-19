@@ -97,7 +97,7 @@ void CharacterDatabaseConnection::DoPrepareStatements()
     PrepareStatement(CHAR_SEL_CHARACTER_REPUTATION, "SELECT faction, standing, flags FROM character_reputation WHERE guid = ?", CONNECTION_ASYNC);
     PrepareStatement(CHAR_SEL_CHARACTER_INVENTORY, "SELECT creatorGuid, giftCreatorGuid, count, duration, charges, flags, enchantments, randomPropertyId, durability, playedTime, text, bag, slot, "
         "item, itemEntry FROM character_inventory ci JOIN item_instance ii ON ci.item = ii.guid WHERE ci.guid = ? "
-        "AND NOT EXISTS (SELECT 1 FROM playerbots_guild_mail_receipt r WHERE r.HeldItemGUID = ci.item) "
+        "AND NOT EXISTS (SELECT 1 FROM item_custody r WHERE r.ItemGUID = ci.item) "
         "ORDER BY bag, slot", CONNECTION_ASYNC);
     PrepareStatement(CHAR_SEL_CHARACTER_ACTIONS, "SELECT a.button, a.action, a.type FROM character_action as a, characters as c WHERE a.guid = c.guid AND a.spec = c.activeTalentGroup AND a.guid = ? ORDER BY button", CONNECTION_ASYNC);
     PrepareStatement(CHAR_SEL_CHARACTER_MAILCOUNT_UNREAD, "SELECT COUNT(id) FROM mail WHERE receiver = ? AND (checked & 1) = 0 AND deliver_time <= ?", CONNECTION_ASYNC);
@@ -140,7 +140,7 @@ void CharacterDatabaseConnection::DoPrepareStatements()
         "durability, playedTime, text, item_guid, itemEntry, ii.owner_guid, m.id FROM mail_items mi "
         "INNER JOIN mail m ON mi.mail_id = m.id LEFT JOIN item_instance ii ON mi.item_guid = ii.guid "
         "WHERE m.receiver = ? AND NOT EXISTS "
-        "(SELECT 1 FROM playerbots_guild_mail_receipt r WHERE r.HeldItemGUID = mi.item_guid)", CONNECTION_BOTH);
+        "(SELECT 1 FROM item_custody r WHERE r.ItemGUID = mi.item_guid)", CONNECTION_BOTH);
     PrepareStatement(CHAR_SEL_AUCTION_ITEMS, "SELECT creatorGuid, giftCreatorGuid, count, duration, charges, flags, enchantments, randomPropertyId, durability, playedTime, text, itemguid, itemEntry FROM auctionhouse ah JOIN item_instance ii ON ah.itemguid = ii.guid", CONNECTION_SYNCH);
     PrepareStatement(CHAR_SEL_AUCTIONS, "SELECT id, houseid, itemguid, itemEntry, count, itemowner, buyoutprice, time, buyguid, lastbid, startbid, deposit FROM auctionhouse ah INNER JOIN item_instance ii ON ii.guid = ah.itemguid", CONNECTION_SYNCH);
     PrepareStatement(CHAR_INS_AUCTION, "INSERT INTO auctionhouse (id, houseid, itemguid, itemowner, buyoutprice, time, buyguid, lastbid, startbid, deposit) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
@@ -157,8 +157,8 @@ void CharacterDatabaseConnection::DoPrepareStatements()
     PrepareStatement(CHAR_UPD_MAIL_RETURNED, "UPDATE mail SET sender = ?, receiver = ?, expire_time = ?, deliver_time = ?, cod = 0, checked = ? WHERE id = ?", CONNECTION_ASYNC);
     PrepareStatement(CHAR_UPD_MAIL_ITEM_RECEIVER, "UPDATE mail_items SET receiver = ? WHERE item_guid = ?", CONNECTION_ASYNC);
     PrepareStatement(CHAR_UPD_ITEM_OWNER,
-        "UPDATE item_instance i LEFT JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = i.guid "
-        "SET i.owner_guid = ? WHERE i.guid = ? AND r.ReceiptID IS NULL", CONNECTION_ASYNC);
+        "UPDATE item_instance i LEFT JOIN item_custody r ON r.ItemGUID = i.guid "
+        "SET i.owner_guid = ? WHERE i.guid = ? AND r.ItemGUID IS NULL", CONNECTION_ASYNC);
 
     PrepareStatement(CHAR_SEL_ITEM_REFUNDS, "SELECT player_guid, paidMoney, paidExtendedCost FROM item_refund_instance WHERE item_guid = ? AND player_guid = ? LIMIT 1", CONNECTION_SYNCH);
     PrepareStatement(CHAR_SEL_ITEM_BOP_TRADE, "SELECT allowedPlayers FROM item_soulbound_trade_data WHERE itemGuid = ? LIMIT 1", CONNECTION_SYNCH);
@@ -167,10 +167,10 @@ void CharacterDatabaseConnection::DoPrepareStatements()
     PrepareStatement(CHAR_REP_INVENTORY_ITEM,
         "REPLACE INTO character_inventory (guid, bag, slot, item) "
         "SELECT n.* FROM (SELECT ? guid, ? bag, ? slot, CAST(? AS UNSIGNED) item) n "
-        "WHERE NOT EXISTS (SELECT 1 FROM playerbots_guild_mail_receipt r WHERE r.HeldItemGUID = n.item)",
+        "WHERE NOT EXISTS (SELECT 1 FROM item_custody r WHERE r.ItemGUID = n.item)",
         CONNECTION_ASYNC);
-    // Native stale saves/deletes must not overwrite durable mail custody, including quarantined receipts.
-    // HeldItemGUID is uniquely indexed and cleared only by delivery; the protocol uses separate guarded writes.
+    // Native stale saves/deletes must not overwrite durable custody, independent of its owning feature.
+    // ItemGUID is uniquely indexed. Only the owning protocol may release its guard in its final transaction.
     // These SQL fences do not replace native RAM fencing or post-commit mailbox reconciliation.
     PrepareStatement(CHAR_REP_ITEM_INSTANCE,
         "REPLACE INTO item_instance (itemEntry, owner_guid, creatorGuid, giftCreatorGuid, count, duration, "
@@ -178,25 +178,25 @@ void CharacterDatabaseConnection::DoPrepareStatements()
         "SELECT n.* FROM (SELECT ? itemEntry, ? owner_guid, ? creatorGuid, ? giftCreatorGuid, ? `count`, "
         "? duration, ? charges, ? flags, ? enchantments, ? randomPropertyId, ? durability, ? playedTime, "
         "? text, CAST(? AS UNSIGNED) guid) n "
-        "WHERE NOT EXISTS (SELECT 1 FROM playerbots_guild_mail_receipt r WHERE r.HeldItemGUID = n.guid)",
+        "WHERE NOT EXISTS (SELECT 1 FROM item_custody r WHERE r.ItemGUID = n.guid)",
         CONNECTION_ASYNC);
     PrepareStatement(CHAR_UPD_ITEM_INSTANCE,
-        "UPDATE item_instance i LEFT JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = i.guid "
+        "UPDATE item_instance i LEFT JOIN item_custody r ON r.ItemGUID = i.guid "
         "SET i.itemEntry = ?, i.owner_guid = ?, i.creatorGuid = ?, i.giftCreatorGuid = ?, i.`count` = ?, "
         "i.duration = ?, i.charges = ?, i.flags = ?, i.enchantments = ?, i.randomPropertyId = ?, "
-        "i.durability = ?, i.playedTime = ?, i.text = ? WHERE i.guid = ? AND r.ReceiptID IS NULL", CONNECTION_ASYNC);
+        "i.durability = ?, i.playedTime = ?, i.text = ? WHERE i.guid = ? AND r.ItemGUID IS NULL", CONNECTION_ASYNC);
     PrepareStatement(CHAR_UPD_ITEM_INSTANCE_ON_LOAD,
-        "UPDATE item_instance i LEFT JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = i.guid "
-        "SET i.duration = ?, i.flags = ?, i.durability = ? WHERE i.guid = ? AND r.ReceiptID IS NULL", CONNECTION_ASYNC);
+        "UPDATE item_instance i LEFT JOIN item_custody r ON r.ItemGUID = i.guid "
+        "SET i.duration = ?, i.flags = ?, i.durability = ? WHERE i.guid = ? AND r.ItemGUID IS NULL", CONNECTION_ASYNC);
     PrepareStatement(CHAR_UPD_ITEM_COUNT,
-        "UPDATE item_instance i LEFT JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = i.guid "
-        "SET i.`count` = ? WHERE i.guid = ? AND r.ReceiptID IS NULL", CONNECTION_ASYNC);
+        "UPDATE item_instance i LEFT JOIN item_custody r ON r.ItemGUID = i.guid "
+        "SET i.`count` = ? WHERE i.guid = ? AND r.ItemGUID IS NULL", CONNECTION_ASYNC);
     PrepareStatement(CHAR_DEL_ITEM_INSTANCE,
-        "DELETE i FROM item_instance i LEFT JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = i.guid "
-        "WHERE i.guid = ? AND r.ReceiptID IS NULL", CONNECTION_ASYNC);
+        "DELETE i FROM item_instance i LEFT JOIN item_custody r ON r.ItemGUID = i.guid "
+        "WHERE i.guid = ? AND r.ItemGUID IS NULL", CONNECTION_ASYNC);
     PrepareStatement(CHAR_DEL_ITEM_INSTANCE_BY_OWNER,
-        "DELETE i FROM item_instance i LEFT JOIN playerbots_guild_mail_receipt r ON r.HeldItemGUID = i.guid "
-        "WHERE i.owner_guid = ? AND r.ReceiptID IS NULL", CONNECTION_ASYNC);
+        "DELETE i FROM item_instance i LEFT JOIN item_custody r ON r.ItemGUID = i.guid "
+        "WHERE i.owner_guid = ? AND r.ItemGUID IS NULL", CONNECTION_ASYNC);
     PrepareStatement(CHAR_UPD_GIFT_OWNER, "UPDATE character_gifts SET guid = ? WHERE item_guid = ?", CONNECTION_ASYNC);
     PrepareStatement(CHAR_DEL_GIFT, "DELETE FROM character_gifts WHERE item_guid = ?", CONNECTION_ASYNC);
     PrepareStatement(CHAR_SEL_CHARACTER_GIFT_BY_ITEM, "SELECT entry, flags FROM character_gifts WHERE item_guid = ?", CONNECTION_ASYNC);
