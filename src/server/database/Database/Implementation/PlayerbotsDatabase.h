@@ -21,6 +21,7 @@
 #define _PlayerbotsDatabase_H
 
 #include "MySQLConnection.h"
+#include "ModulePreparedStatementRegistry.h"
 
 enum PlayerbotsDatabaseStatements : uint32
 {
@@ -116,9 +117,6 @@ enum PlayerbotsDatabaseStatements : uint32
     PLAYERBOTS_INS_EQUIP_CACHE_NEW,
     PLAYERBOTS_DEL_EQUIP_CACHE_NEW,
 
-    PLAYERBOTS_SEL_AUTONOMOUS_PROFILES,
-    PLAYERBOTS_INS_AUTONOMOUS_PROFILE,
-
     MAX_PLAYERBOTS_STATEMENTS
 };
 
@@ -126,6 +124,7 @@ class AC_DATABASE_API PlayerbotsDatabaseConnection : public MySQLConnection
 {
 public:
     typedef PlayerbotsDatabaseStatements Statements;
+    static Acore::ModulePreparedStatementRegistry<ConnectionFlags>& ModuleStatements();
 
     //- Constructors for sync and async connections
     PlayerbotsDatabaseConnection(MySQLConnectionInfo& connInfo);

@@ -342,6 +342,8 @@ void DatabaseWorkerPool<T>::DirectCommitTransaction(SQLTransaction<T>& transacti
 template <class T>
 PreparedStatement<T>* DatabaseWorkerPool<T>::GetPreparedStatement(PreparedStatementIndex index)
 {
+    if (static_cast<std::size_t>(index) >= _preparedStatementSize.size())
+        ABORT("Prepared statement requested before preparation or with an unregistered index");
     return new PreparedStatement<T>(index, _preparedStatementSize[index]);
 }
 

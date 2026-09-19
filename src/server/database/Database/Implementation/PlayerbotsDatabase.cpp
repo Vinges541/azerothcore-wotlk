@@ -20,10 +20,17 @@
 #include "PlayerbotsDatabase.h"
 #include "MySQLPreparedStatement.h"
 
+Acore::ModulePreparedStatementRegistry<ConnectionFlags>& PlayerbotsDatabaseConnection::ModuleStatements()
+{
+    static Acore::ModulePreparedStatementRegistry<ConnectionFlags> registry(MAX_PLAYERBOTS_STATEMENTS, CONNECTION_BOTH);
+    return registry;
+}
+
 void PlayerbotsDatabaseConnection::DoPrepareStatements()
 {
+    auto const moduleStatements = ModuleStatements().Freeze();
     if (!m_reconnecting)
-        m_stmts.resize(MAX_PLAYERBOTS_STATEMENTS);
+        m_stmts.resize(MAX_PLAYERBOTS_STATEMENTS + moduleStatements.size());
 
     PrepareStatement(PLAYERBOTS_SEL_CUSTOM_STRATEGY_BY_OWNER, "SELECT DISTINCT name FROM playerbots_custom_strategy WHERE owner = ?", CONNECTION_SYNCH);
     PrepareStatement(PLAYERBOTS_SEL_CUSTOM_STRATEGY_BY_OWNER_AND_NAME, "SELECT idx, action_line FROM playerbots_custom_strategy WHERE owner = ? AND name = ? ORDER BY idx", CONNECTION_SYNCH);
@@ -326,35 +333,8 @@ void PlayerbotsDatabaseConnection::DoPrepareStatements()
             "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", CONNECTION_ASYNC);
     PrepareStatement(PLAYERBOTS_DEL_EQUIP_CACHE_NEW, "DELETE FROM playerbots_item_info_cache WHERE id = ?", CONNECTION_ASYNC);
 
-    // Always returns 32 rows, including missing profiles: an empty result is a failed read, not new identities.
-    PrepareStatement(PLAYERBOTS_SEL_AUTONOMOUS_PROFILES,
-        "SELECT ids.guid, p.version, p.revision, p.payload FROM ("
-        "SELECT CAST(? AS UNSIGNED) AS guid UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED) "
-        "UNION ALL SELECT CAST(? AS UNSIGNED) UNION ALL SELECT CAST(? AS UNSIGNED)"
-        ") ids LEFT JOIN playerbots_autonomous_profile p ON p.guid = ids.guid", CONNECTION_SYNCH);
-    // Upgrade codec only with a current revision; delayed old-codec writes must never downgrade a biography.
-    // Payload/time precede version and revision assignments, so their guards see the original row.
-    PrepareStatement(PLAYERBOTS_INS_AUTONOMOUS_PROFILE,
-        "INSERT INTO playerbots_autonomous_profile (guid, version, revision, updated_at, payload) "
-        "VALUES (?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE "
-        "payload = IF(version <= VALUES(version) AND revision <= VALUES(revision), VALUES(payload), payload), "
-        "updated_at = IF(version <= VALUES(version) AND revision <= VALUES(revision), VALUES(updated_at), updated_at), "
-        "version = IF(version <= VALUES(version) AND revision <= VALUES(revision), VALUES(version), version), "
-        "revision = IF(version = VALUES(version), GREATEST(revision, VALUES(revision)), revision)", CONNECTION_ASYNC);
+    for (auto const& statement : moduleStatements)
+        PrepareStatement(statement.index, statement.sql, statement.flags);
 }
 
 PlayerbotsDatabaseConnection::PlayerbotsDatabaseConnection(MySQLConnectionInfo& connInfo) : MySQLConnection(connInfo)
