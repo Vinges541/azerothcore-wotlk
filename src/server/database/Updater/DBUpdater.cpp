@@ -341,7 +341,8 @@ bool DBUpdater<T>::Update(DatabaseWorkerPool<T>& pool, std::string_view modulesL
 
     UpdateFetcher updateFetcher(sourceDirectory, [&](std::string const & query) { DBUpdater<T>::Apply(pool, query); },
     [&](Path const & file) { DBUpdater<T>::ApplyFile(pool, file); },
-    [&](std::string const & query) -> QueryResult { return DBUpdater<T>::Retrieve(pool, query); }, DBUpdater<T>::GetDBModuleName(), modulesList);
+    [&](std::string const& query) -> QueryResult { return DBUpdater<T>::Retrieve(pool, query); },
+        DBUpdater<T>::GetDBModuleName(), modulesList, Path(BuiltInConfig::GetSourceDirectory()) / "modules");
 
     UpdateResult result;
     try

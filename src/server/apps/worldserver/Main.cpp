@@ -279,6 +279,8 @@ int main(int argc, char** argv)
     });
 
     LOG_INFO("server.loading", "Initializing Scripts...");
+    // Make the compiled module roster available to module-owned database loaders as well.
+    Acore::Module::SetEnableModulesList(AC_MODULES_LIST);
     sScriptMgr->Initialize();
 
     // Start the databases
@@ -307,8 +309,6 @@ int main(int argc, char** argv)
         METRIC_EVENT("events", "Worldserver shutdown", "");
         sMetric->Unload();
     });
-
-    Acore::Module::SetEnableModulesList(AC_MODULES_LIST);
 
     ///- Initialize the World
     sSecretMgr->Initialize();

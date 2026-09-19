@@ -41,7 +41,8 @@ UpdateFetcher::UpdateFetcher(Path const& sourceDirectory,
                              std::function<void(std::string const&)> const& apply,
                              std::function<void(Path const& path)> const& applyFile,
                              std::function<QueryResult(std::string const&)> const& retrieve, std::string const& dbModuleName, std::vector<std::string> const* setDirectories /*= nullptr*/) :
-    _sourceDirectory(std::make_unique<Path>(sourceDirectory)), _apply(apply), _applyFile(applyFile),
+    _sourceDirectory(std::make_unique<Path>(sourceDirectory)), _modulesDirectory(sourceDirectory / "modules"),
+    _apply(apply), _applyFile(applyFile),
     _retrieve(retrieve), _dbModuleName(dbModuleName), _setDirectories(setDirectories)
 {
 }
@@ -51,8 +52,10 @@ UpdateFetcher::UpdateFetcher(Path const& sourceDirectory,
     std::function<void(Path const& path)> const& applyFile,
     std::function<QueryResult(std::string const&)> const& retrieve,
     std::string const& dbModuleName,
-    std::string_view modulesList /*= {}*/) :
-    _sourceDirectory(std::make_unique<Path>(sourceDirectory)), _apply(apply), _applyFile(applyFile),
+    std::string_view modulesList /*= {}*/, Path const& modulesDirectory /*= {}*/) :
+    _sourceDirectory(std::make_unique<Path>(sourceDirectory)),
+    _modulesDirectory(modulesDirectory.empty() ? sourceDirectory / "modules" : modulesDirectory),
+    _apply(apply), _applyFile(applyFile),
     _retrieve(retrieve), _dbModuleName(dbModuleName), _setDirectories(nullptr), _modulesList(modulesList)
 {
 }
@@ -162,8 +165,7 @@ UpdateFetcher::DirectoryStorage UpdateFetcher::ReceiveIncludedDirectories() cons
         // data/sql
         for (auto const& moduleName : moduleList)
         {
-            std::string path = _sourceDirectory->generic_string() + "/modules/" + moduleName + "/data/sql/"; // modules/mod-name/data/sql/
-            Path const p{path};
+            Path const p = _modulesDirectory / moduleName / "data/sql";
             if (!is_directory(p))
                 continue;
 
@@ -411,9 +413,14 @@ UpdateResult UpdateFetcher::Update(bool const redundancyChecks,
         bool const doCleanup = (cleanDeadReferencesMaxCount < 0) || (applied.size() <= static_cast<size_t>(cleanDeadReferencesMaxCount));
 
         AppliedFileStorage toCleanup;
+        // Released migrations may transfer ownership of a missing file to a disabled module.
+        // Do not delete that entry using the pre-migration state snapshot. On a failed read,
+        // the empty snapshot conservatively skips cleanup rather than discarding journal history.
+        AppliedFileStorage const current = ReceiveAppliedFiles();
         for (auto const& entry : applied)
         {
-            if (entry.second.state != MODULE)
+            auto const found = current.find(entry.first);
+            if (found != current.end() && found->second.state != MODULE)
             {
                 LOG_WARN("sql.updates",
                          ">> The file \'{}\' was applied to the database, but is missing in"

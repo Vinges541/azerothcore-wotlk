@@ -54,7 +54,7 @@ public:
         std::function<void(Path const& path)> const& applyFile,
         std::function<QueryResult(std::string const&)> const& retrieve,
         std::string const& dbModuleName,
-        std::string_view modulesList = {});
+        std::string_view modulesList = {}, Path const& modulesDirectory = {});
 
     ~UpdateFetcher();
 
@@ -158,6 +158,7 @@ private:
     void UpdateState(std::string const& name, State const state) const;
 
     std::unique_ptr<Path> const _sourceDirectory;
+    Path const _modulesDirectory;
 
     std::function<void(std::string const&)> const _apply;
     std::function<void(Path const& path)> const _applyFile;
