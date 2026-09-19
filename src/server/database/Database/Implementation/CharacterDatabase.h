@@ -19,6 +19,7 @@
 #define _CHARACTERDATABASE_H
 
 #include "MySQLConnection.h"
+#include "ModulePreparedStatementRegistry.h"
 
 enum CharacterDatabaseStatements : uint32
 {
@@ -110,25 +111,6 @@ enum CharacterDatabaseStatements : uint32
     CHAR_DEL_MAIL_BY_ID,
     CHAR_INS_MAIL_ITEM,
     CHAR_DEL_MAIL_ITEM,
-    CHAR_LOCK_GUILD_MAIL_SOURCE,
-    CHAR_LOCK_GUILD_MAIL_LINK,
-    CHAR_LOCK_GUILD_MAIL_ITEM,
-    CHAR_INS_GUILD_MAIL_RECEIPT,
-    CHAR_UPD_GUILD_MAIL_CUSTODY,
-    CHAR_DEL_GUILD_MAIL_SOURCE_LINK,
-    CHAR_UPD_GUILD_MAIL_SOURCE_EMPTY,
-    CHAR_UPD_GUILD_MAIL_RECEIPT_RESOLVE,
-    CHAR_UPD_GUILD_MAIL_DELIVERY_RESERVE,
-    CHAR_INS_GUILD_MAIL_DELIVERY,
-    CHAR_UPD_GUILD_MAIL_RETURN_ITEM,
-    CHAR_INS_GUILD_MAIL_RETURN_LINK,
-    CHAR_DEL_GUILD_MAIL_CONSUMED_ITEM,
-    CHAR_UPD_GUILD_MAIL_DELIVERED,
-    CHAR_SEL_GUILD_MAIL_RECEIPT_BY_ITEM,
-    CHAR_SEL_GUILD_MAIL_RECEIPT,
-    CHAR_SEL_GUILD_MAIL_RECEIPT_PAGE,
-    CHAR_SEL_GUILD_MAIL_HELD_ITEM,
-    CHAR_SEL_GUILD_MAIL_DELIVERY_SNAPSHOT,
     CHAR_SEL_MAIL_ID_HIGH_WATER,
     CHAR_SEL_MAIL_COUNTS,
     CHAR_SEL_MAIL_COUNT_BY_RECEIVER,
@@ -577,6 +559,8 @@ class AC_DATABASE_API CharacterDatabaseConnection : public MySQLConnection
 {
 public:
     typedef CharacterDatabaseStatements Statements;
+
+    static Acore::ModulePreparedStatementRegistry<ConnectionFlags>& ModuleStatements();
 
     //- Constructors for sync and async connections
     CharacterDatabaseConnection(MySQLConnectionInfo& connInfo);
