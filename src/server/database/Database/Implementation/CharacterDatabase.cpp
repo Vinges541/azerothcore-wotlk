@@ -126,8 +126,12 @@ void CharacterDatabaseConnection::DoPrepareStatements()
 
     PrepareStatement(CHAR_SEL_MAIL_ID_HIGH_WATER,
         "SELECT CAST(GREATEST(COALESCE((SELECT MAX(id) FROM mail), 0), "
-        "COALESCE((SELECT MAX(DeliveryMailID) FROM playerbots_guild_mail_receipt), 0)) AS UNSIGNED)",
+        "COALESCE((SELECT `value` FROM mail_id_high_water WHERE id = 1), 0)) AS UNSIGNED)",
         CONNECTION_SYNCH);
+    // Append to the transaction publishing a durable reference to a mail ID. Never lower the watermark.
+    PrepareStatement(CHAR_UPD_MAIL_ID_HIGH_WATER,
+        "INSERT INTO mail_id_high_water (id, `value`) VALUES (1, ?) "
+        "ON DUPLICATE KEY UPDATE `value` = GREATEST(`value`, VALUES(`value`))", CONNECTION_ASYNC);
 
     PrepareStatement(CHAR_SEL_CHARACTER_ACTIONS_SPEC, "SELECT button, action, type FROM character_action WHERE guid = ? AND spec = ? ORDER BY button", CONNECTION_ASYNC);
     // Do not instantiate a second native copy of a held item from a stale mail/inventory link at login.

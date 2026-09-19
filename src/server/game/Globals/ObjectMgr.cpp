@@ -7594,7 +7594,7 @@ void ObjectMgr::SetHighestGuids()
     if (result)
         _auctionId = (*result)[0].Get<uint32>() + 1;
 
-    // Receipts retain delivery IDs after native mail deletion. Never reuse those IDs after restart.
+    // Durable references can outlive native mail. Restore the general reservation watermark as well.
     PreparedQueryResult mailIds = CharacterDatabase.Query(
         CharacterDatabase.GetPreparedStatement(CHAR_SEL_MAIL_ID_HIGH_WATER));
     if (!mailIds)
